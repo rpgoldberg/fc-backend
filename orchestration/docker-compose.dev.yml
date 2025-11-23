@@ -1,0 +1,98 @@
+version: '3.8'
+
+services:
+  # Backend API service (development)
+  backend:
+    build:
+      context: ../fc-backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: ${BACKEND_SERVICE_NAME:-fc-backend}
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=${ENVIRONMENT:-development}
+      - PORT=${BACKEND_PORT:-5070}
+      - MONGODB_URI=${MONGODB_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - SCRAPER_SERVICE_URL=${SCRAPER_SERVICE_URL}
+      - SERVICE_AUTH_TOKEN=${SERVICE_AUTH_TOKEN}
+    ports:
+      - "${BACKEND_PORT:-5070}:${BACKEND_PORT:-5070}"
+    volumes:
+      - ../fc-backend/src:/app/src
+      - ../fc-backend/package.json:/app/package.json
+    networks:
+      - fc-network
+    depends_on:
+      - mongodb
+      - scraper
+
+  # Frontend application (development)
+  frontend:
+    build:
+      context: ../fc-frontend
+      dockerfile: Dockerfile
+      target: development
+      args:
+        - REACT_APP_API_URL=${REACT_APP_API_URL}
+    container_name: ${FRONTEND_SERVICE_NAME:-fc-frontend}
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=${ENVIRONMENT:-development}
+      - PORT=${FRONTEND_PORT:-5071}
+      - REACT_APP_API_URL=${REACT_APP_API_URL}
+      - BACKEND_HOST=${BACKEND_HOST}
+      - BACKEND_PORT=${BACKEND_PORT}
+      - FRONTEND_PORT=${FRONTEND_PORT}
+    ports:
+      - "${FRONTEND_PORT:-5071}:${FRONTEND_PORT:-5071}"
+    volumes:
+      - ../fc-frontend/src:/app/src
+      - ../fc-frontend/public:/app/public
+      - ../fc-frontend/package.json:/app/package.json
+    networks:
+      - fc-network
+    depends_on:
+      - backend
+
+  # Scraper service (development)
+  scraper:
+    build:
+      context: ../scraper
+      dockerfile: Dockerfile
+      target: development
+    container_name: ${SCRAPER_SERVICE_NAME:-scraper}
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=${ENVIRONMENT:-development}
+      - PORT=${SCRAPER_PORT:-3010}
+      - SERVICE_AUTH_TOKEN=${SERVICE_AUTH_TOKEN}
+    ports:
+      - "${SCRAPER_PORT:-3010}:${SCRAPER_PORT:-3010}"
+    volumes:
+      - ../scraper/src:/app/src
+      - ../scraper/package.json:/app/package.json
+    networks:
+      - fc-network
+    shm_size: '2gb'  # Puppeteer needs shared memory
+
+  # MongoDB for local development
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_DATABASE=figure-collector-dev
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - fc-network
+
+networks:
+  fc-network:
+    driver: bridge
+
+volumes:
+  mongodb_data:

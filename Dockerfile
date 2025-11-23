@@ -72,7 +72,7 @@ FROM node:25-alpine AS production
 
 # Build arguments for customization
 ARG GITHUB_ORG=rpgoldberg
-ARG GITHUB_REPO=figure-collector-backend
+ARG GITHUB_REPO=fc-backend
 
 # Add labels for better tracking
 LABEL org.opencontainers.image.title="Figure Collector Backend"

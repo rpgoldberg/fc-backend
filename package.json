@@ -1,5 +1,5 @@
 {
-  "name": "figure-collector-backend",
+  "name": "fc-backend",
   "version": "2.1.0",
   "description": "Backend API for figure collection management",
 
@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "dev": "ts-node-dev --respawn --transpile-only -r dotenv/config src/index.ts",
     "test": "NODE_OPTIONS=--experimental-vm-modules npx jest --passWithNoTests --verbose --bail=false --runInBand",
     "test:memory": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory npx jest --passWithNoTests --verbose --bail=false --runInBand",
     "test:atlas": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=atlas npx jest --passWithNoTests --verbose --bail=false --runInBand",

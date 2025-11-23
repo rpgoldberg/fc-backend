@@ -84,7 +84,7 @@ describe('Database Configuration', () => {
 
     // Partially restore original implementation
     const originalConnectDB = jest.requireActual('../../src/config/db').connectDB;
-    
+
     // Run actual connection method
     await originalConnectDB();
 

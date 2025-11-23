@@ -1,0 +1,38 @@
+version: '3.8'
+
+# Docker Compose configuration for containerized testing with coverage extraction
+# Usage: docker-compose -f docker-compose.test.yml up --build
+
+services:
+  backend-test:
+    build:
+      context: ../fc-backend
+      dockerfile: Dockerfile.test
+    environment:
+      - NODE_ENV=test
+      - TEST_MODE=memory
+      - CI=true
+    volumes:
+      - ./test-results/backend:/app/test-output
+    command: sh -c "npm run test:coverage && mkdir -p /app/test-output && cp -r coverage /app/test-output/"
+
+  frontend-test:
+    build:
+      context: ../fc-frontend
+      dockerfile: Dockerfile.test
+    environment:
+      - CI=true
+      - GENERATE_SOURCEMAP=false
+    volumes:
+      - ./test-results/frontend:/app/test-output
+    command: bash -c "npm test -- --coverage --watchAll=false && mkdir -p /app/test-output && cp -r coverage /app/test-output/"
+
+  scraper-test:
+    build:
+      context: ../scraper
+      dockerfile: Dockerfile.test
+    environment:
+      - NODE_ENV=test
+    volumes:
+      - ./test-results/scraper:/app/test-output
+    command: sh -c "npm run test:coverage && mkdir -p /app/test-output && cp -r coverage /app/test-output/"

@@ -9,8 +9,7 @@ Backend API service for the Figure Collector application. Provides endpoints for
 - Search functionality with MongoDB Atlas Search
 - Filtering and statistics
 - Service version orchestration and aggregation
-- Frontend service registration endpoint
-- Version validation with version-manager integration
+- Service health monitoring and version reporting
 
 ## Technology Stack
 
@@ -22,20 +21,48 @@ Backend API service for the Figure Collector application. Provides endpoints for
 
 ## Version Management Architecture
 
-The backend acts as the central orchestrator for version management:
+The backend acts as the central orchestrator for service version reporting:
 
-- **Service Registration**: Provides `/register-service` endpoint for frontend self-registration
-- **Version Aggregation**: Collects versions from all services (frontend via registration, scraper via API call)
-- **Version Validation**: Integrates with version-manager to validate service version combinations
-- **Unified API**: Provides single `/version` endpoint with all service information and validation status
+- **Self-Reporting**: Each service exposes a `/health` endpoint with `{service, version, status}`
+- **Version Aggregation**: Backend's `/version` endpoint aggregates health status from all services
+- **Unified API**: Single `/version` endpoint provides complete service health and version information
+- **Frontend Integration**: Frontend enriches aggregated data with its own version from package.json
 
 ## Development
+
+### Environment Setup
+
+**Quick Start:**
+```bash
+# Auto-generate .env file with secure random secrets
+./setup-local-env.sh
+
+# Or manually copy and edit
+cp .env.example .env
+# Then edit .env and replace placeholder values
+```
+
+**Configuration Files:**
+- `.env.example` - Template showing required environment variables
+- `setup-local-env.sh` - Script to auto-generate .env with random JWT secrets
+- `.env` - Your local configuration (gitignored, never commit this!)
+
+See `.env.example` for all configuration options including:
+- Local MongoDB (default) vs MongoDB Atlas
+- JWT secrets and token expiry settings
+- Optional refresh token rotation
 
 ### Local Development
 
 ```bash
 # Install dependencies
 npm install
+
+# Set up environment (first time only)
+./setup-local-env.sh
+
+# Start MongoDB (if using local MongoDB)
+docker run -d -p 27017:27017 --name mongodb mongo:latest
 
 # Start development server
 npm run dev
@@ -88,9 +115,8 @@ docker run -p 5050:5050 -e PORT=5050 backend:prod
 ## API Endpoints
 
 **Infrastructure Endpoints** (accessed directly via nginx proxy)
-- `POST /register-frontend` - Frontend registration proxy (forwards to Version Manager with auth)
-- `GET /version` - Aggregated version info from Version Manager
-- `GET /health` - Service health check
+- `GET /version` - Aggregated service health and version information
+- `GET /health` - Service health check with version info
 
 **Business Logic APIs** (accessed via `/api` prefix through nginx)
 - `/figures` - Figure management endpoints (with `page` and `limit` query parameters only)
@@ -113,12 +139,16 @@ Note: The nginx frontend proxy strips `/api` prefix, so backend endpoints don't 
 
 ### Environment Variables
 
+See `.env.example` for complete configuration template. Run `./setup-local-env.sh` to auto-generate.
+
 **Required:**
-- `MONGODB_URI`: MongoDB Atlas connection string
+- `MONGODB_URI`: MongoDB connection string (local: `mongodb://localhost:27017/figure-collector-dev` or Atlas)
 - `JWT_SECRET`: Secret for JWT token signing (⚠️ **MUST be at least 32 characters in production**)
 - `JWT_REFRESH_SECRET`: Secret for refresh token signing (⚠️ **MUST be at least 32 characters in production**)
-- `SCRAPER_SERVICE_URL`: URL to page-scraper service (e.g., `http://page-scraper-dev:3010`)
-- `VERSION_MANAGER_URL`: URL to version-manager (e.g., `http://version-manager-dev:3011`)
+- `SCRAPER_SERVICE_URL`: URL to scraper service
+  - Local: `http://localhost:3000`
+  - Docker/Coolify: `http://scraper:3000` or `http://scraper-dev:3010`
+  - (Must match service/network name for container DNS resolution)
 - `PORT`: Port for backend service (default: 5000)
 - `NODE_ENV`: Environment (development/production)
 
@@ -126,18 +156,14 @@ Note: The nginx frontend proxy strips `/api` prefix, so backend endpoints don't 
 - `ACCESS_TOKEN_EXPIRY`: Access token expiration time (default: 15m)
 - `ROTATE_REFRESH_TOKENS`: Enable refresh token rotation for enhanced security (default: false)
 
-**Security Note:** Generate secure secrets using: `openssl rand -base64 32`
-
-**Service Registration:**
-- `VERSION_MANAGER_URL`: URL of Version Manager service (default: http://version-manager:3001)
-- `SERVICE_AUTH_TOKEN`: Authentication token for service registration (required for production)
-
 **Debug Logging:**
 - `DEBUG`: Enable debug namespaces (e.g., `backend:*`, `backend:auth`, `backend:registration`)
 - `SERVICE_AUTH_TOKEN_DEBUG`: Show partial tokens in logs for debugging (default: false)
 
-**No longer required:**
-- `FRONTEND_HOST`, `FRONTEND_PORT`: Removed due to self-registration architecture
+**Security Note:**
+- Generate secure secrets using: `openssl rand -base64 32`
+- Or run `./setup-local-env.sh` to auto-generate random secrets
+- Never commit `.env` files (already in .gitignore)
 
 ### Token Management
 
@@ -173,7 +199,7 @@ The backend includes extensive test infrastructure with enhanced Docker testing,
 - **Integration Tests**: API endpoints with database operations
 - **Performance Tests**: Database queries and API response times
 - **Authentication Tests**: JWT handling, user registration/login
-- **Version Management Tests**: Service registration and validation
+- **Service Health Tests**: Version reporting and health checks
 - **Error Handling Tests**: Various failure scenarios
 
 ### Test Structure

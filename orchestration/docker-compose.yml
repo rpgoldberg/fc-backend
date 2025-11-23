@@ -1,0 +1,75 @@
+version: '3.8'
+services:
+  # Backend API service
+  backend:
+    image: ${REGISTRY_URL}/${BACKEND_SERVICE_NAME}:${BACKEND_TAG:-latest}
+    restart: always
+    environment:
+      - NODE_ENV=${ENVIRONMENT:-production}
+      - PORT=${BACKEND_PORT:-5050}
+      - MONGODB_URI=${MONGODB_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - SCRAPER_SERVICE_URL=${SCRAPER_SERVICE_URL}
+    ports:
+      - "${BACKEND_PORT:-5050}:${BACKEND_PORT:-5050}"
+    depends_on:
+      - scraper
+    networks:
+      - fc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${BACKEND_PORT:-5050}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      coolify.enable: "true"
+      coolify.name: "${BACKEND_SERVICE_NAME:-fc-backend}"
+      coolify.type: "application"
+      coolify.autodeploy: "true"
+
+  # Page scraper service
+  scraper:
+    image: ${REGISTRY_URL}/${SCRAPER_SERVICE_NAME}:${SCRAPER_TAG:-latest}
+    restart: always
+    environment:
+      - NODE_ENV=${ENVIRONMENT:-production}
+      - PORT=${SCRAPER_PORT:-3000}
+    ports:
+      - "${SCRAPER_PORT:-3000}:${SCRAPER_PORT:-3000}"
+    networks:
+      - fc-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-s", "-o", "/dev/null", "http://localhost:${SCRAPER_PORT:-3000}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      coolify.enable: "true"
+      coolify.name: "${SCRAPER_SERVICE_NAME:-scraper}"
+      coolify.type: "application"
+      coolify.autodeploy: "true"
+
+  # Frontend application
+  frontend:
+    image: ${REGISTRY_URL}/${FRONTEND_SERVICE_NAME}:${FRONTEND_TAG:-latest}
+    restart: always
+    environment:
+      - REACT_APP_API_URL=/api
+      - BACKEND_HOST=${BACKEND_HOST}
+      - BACKEND_PORT=${BACKEND_PORT:-5050}
+      - FRONTEND_PORT=${FRONTEND_PORT:-5051}
+    ports:
+      - "${FRONTEND_PORT:-5051}:${FRONTEND_PORT:-5051}"
+    depends_on:
+      - backend
+    networks:
+      - fc-network
+    labels:
+      coolify.enable: "true"
+      coolify.name: "${FRONTEND_SERVICE_NAME:-fc-frontend}"
+      coolify.type: "application"
+      coolify.autodeploy: "true"
+
+networks:
+  fc-network:
+    driver: bridge

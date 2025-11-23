@@ -20,7 +20,7 @@ describe('Database Connection Retry Logic', () => {
     
     // Restore environment
     process.env = { ...originalEnv };
-    process.env.MONGODB_URI = 'mongodb://localhost:27017/figure-collector';
+    process.env.MONGODB_URI = 'mongodb://localhost:27017/fc-db';
     // Set NODE_ENV to production to test actual retry logic
     process.env.NODE_ENV = 'production';
 
@@ -51,7 +51,7 @@ describe('Database Connection Retry Logic', () => {
 
     // Assertions
     expect(mockConnect).toHaveBeenCalledWith(
-      'mongodb://localhost:27017/figure-collector'
+      'mongodb://localhost:27017/fc-db'
     );
     expect(mockConsoleLog).toHaveBeenCalledWith(
       expect.stringContaining('MongoDB Connected')
