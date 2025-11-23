@@ -131,17 +131,23 @@ const scrapeDataFromMFCWithAxios = async (mfcLink: string): Promise<MFCScrapedDa
 };
 
 // Call dedicated scraper service
-const scrapeDataFromMFC = async (mfcLink: string): Promise<MFCScrapedData> => {
+const scrapeDataFromMFC = async (mfcLink: string, mfcAuth?: string): Promise<MFCScrapedData> => {
   console.log(`[MFC MAIN] Starting scrape via scraper service for: ${mfcLink}`);
-  
-  const scraperServiceUrl = process.env.SCRAPER_SERVICE_URL || 'http://page-scraper-dev:3000'; // NOSONAR
-  
+  if (mfcAuth) {
+    console.log('[MFC MAIN] Including MFC authentication cookies');
+  }
+
+  const scraperServiceUrl = process.env.SCRAPER_SERVICE_URL || 'http://scraper-dev:3000'; // NOSONAR
+
   try {
     console.log(`[MFC MAIN] Calling scraper service at: ${scraperServiceUrl}`);
-    
-    const response = await axios.post(`${scraperServiceUrl}/scrape/mfc`, {
-      url: mfcLink
-    }, {
+
+    const requestBody: any = { url: mfcLink };
+    if (mfcAuth) {
+      requestBody.mfcAuth = mfcAuth;
+    }
+
+    const response = await axios.post(`${scraperServiceUrl}/scrape/mfc`, requestBody, {
       timeout: 45000, // 45 second timeout for browser automation
       headers: {
         'Content-Type': 'application/json'
@@ -158,8 +164,19 @@ const scrapeDataFromMFC = async (mfcLink: string): Promise<MFCScrapedData> => {
     
   } catch (error: any) {
     console.error('[MFC MAIN] Scraper service failed:', error.message);
-    
-    // If scraper service is down, try local fallback
+
+    // Check if this is a user-facing error that should be shown to the user
+    // (like NSFW auth requirements or MFC 404 messages)
+    const errorMessage = error.response?.data?.message || error.message || '';
+    if (errorMessage.includes('MFC_ITEM_NOT_ACCESSIBLE') ||
+        errorMessage.includes('NSFW_AUTH_REQUIRED') ||
+        errorMessage.includes('requires MFC authentication')) {
+      // Re-throw user-facing errors so they reach the user
+      console.log('[MFC MAIN] Re-throwing user-facing error');
+      throw new Error(errorMessage);
+    }
+
+    // If scraper service is down (network/connection error), try local fallback
     console.log('[MFC MAIN] Falling back to local axios method...');
     try {
       const axiosResult = await scrapeDataFromMFCWithAxios(mfcLink);
@@ -170,7 +187,7 @@ const scrapeDataFromMFC = async (mfcLink: string): Promise<MFCScrapedData> => {
     } catch (fallbackError: any) {
       console.error('[MFC MAIN] Local fallback also failed:', fallbackError.message);
     }
-    
+
     // Return manual extraction guidance if all methods fail
     return {
       imageUrl: `MANUAL_EXTRACT:${mfcLink}`,
@@ -188,8 +205,8 @@ export const scrapeMFCData = async (req: Request, res: Response) => {
   console.log('[MFC ENDPOINT] Request headers:', req.headers);
   
   try {
-    const { mfcLink } = req.body;
-    
+    const { mfcLink, mfcAuth } = req.body;
+
     if (!mfcLink) {
       console.log('[MFC ENDPOINT] No MFC link provided in request');
       return res.status(400).json({
@@ -197,8 +214,11 @@ export const scrapeMFCData = async (req: Request, res: Response) => {
         message: 'MFC link is required'
       });
     }
-    
+
     console.log(`[MFC ENDPOINT] Processing MFC link: ${mfcLink}`);
+    if (mfcAuth) {
+      console.log('[MFC ENDPOINT] MFC authentication cookies provided');
+    }
     
     // Validate URL format
     try {
@@ -222,7 +242,7 @@ export const scrapeMFCData = async (req: Request, res: Response) => {
     }
     
     console.log('[MFC ENDPOINT] Starting scraping process...');
-    const scrapedData = await scrapeDataFromMFC(mfcLink);
+    const scrapedData = await scrapeDataFromMFC(mfcLink, mfcAuth);
     console.log('[MFC ENDPOINT] Scraping completed, data:', scrapedData);
     
     return res.status(200).json({
@@ -231,9 +251,12 @@ export const scrapeMFCData = async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('[MFC ENDPOINT] Error in scrapeMFCData:', error);
+
+    // Return the actual error message from the scraper for better UX
+    // This includes helpful messages like NSFW auth requirements
     return res.status(500).json({
       success: false,
-      message: 'Server Error',
+      message: error.message || 'Server Error',
       error: error.message
     });
   }

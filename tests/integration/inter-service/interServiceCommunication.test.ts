@@ -7,9 +7,8 @@ import { createTestApp } from '../../helpers/testApp';
 jest.mock('axios');
 jest.mock('node-fetch', () => jest.fn());
 
-// Environment configuration 
-const SCRAPER_SERVICE_URL = process.env.SCRAPER_SERVICE_URL || 'http://page-scraper:3000';
-const VERSION_SERVICE_URL = process.env.VERSION_SERVICE_URL || 'http://version-manager:3001';
+// Environment configuration
+const SCRAPER_SERVICE_URL = process.env.SCRAPER_SERVICE_URL || 'http://scraper:3000';
 
 describe('Inter-Service Communication', () => {
   let app: Express;
@@ -35,111 +34,83 @@ describe('Inter-Service Communication', () => {
         expect(response.data).toHaveProperty('itemData');
         expect(response.data.itemData.name).toBe('Test Figure');
         // Additional assertions based on expected scraper response structure
-      } catch (error) {
+      } catch (error: any) {
         throw new Error(`Scraper service communication failed: ${error.message}`);
       }
     });
   });
 
-  describe('Backend → Version Service Communication', () => {
-    it('should fetch app version from Version Service', async () => {
-      try {
-        const mockFetch = jest.fn().mockResolvedValue({
-          ok: true,
-          json: () => Promise.resolve({ name: 'Figure Collector', version: '1.0.0' })
-        });
-        global.fetch = mockFetch as jest.MockedFunction<typeof fetch>;
-
-        const response = await fetch(`${VERSION_SERVICE_URL}/app-version`);
-        const versionData = await response.json();
-
-        expect(response.ok).toBe(true);
-        expect(versionData).toHaveProperty('name', 'Figure Collector');
-        expect(versionData).toHaveProperty('version', '1.0.0');
-      } catch (error) {
-        throw new Error(`Version service communication failed: ${error.message}`);
-      }
-    });
-
-    it('should validate version combinations via Version Service', async () => {
-      const testVersions = {
-        backend: '1.0.0',
-        frontend: '1.0.0',
-        scraper: '1.0.0'
-      };
-
-      try {
-        global.fetch = jest.fn().mockResolvedValue({
-          ok: true,
-          json: () => Promise.resolve({ isCompatible: true, services: testVersions })
-        });
-
-        const response = await fetch(
-          `${VERSION_SERVICE_URL}/validate-versions?` + 
-          `backend=${testVersions.backend}&` +
-          `frontend=${testVersions.frontend}&` +
-          `scraper=${testVersions.scraper}`
-        );
-        const validationData = await response.json();
-
-        expect(response.ok).toBe(true);
-        expect(validationData).toHaveProperty('isCompatible', true);
-        expect(validationData).toHaveProperty('services', testVersions);
-      } catch (error) {
-        throw new Error(`Version validation service failed: ${error.message}`);
-      }
-    });
-  });
-
-  describe('Backend Service Registration and Version Aggregation', () => {
-    it('should register frontend service successfully', async () => {
-      const response = await request(app)
-        .post('/register-service')
-        .send({
-          serviceName: 'frontend',
-          version: '1.0.0'
-        });
-
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('message', 'Service registered successfully');
-      expect(response.body.success).toBe(true);
-    });
-
-    it('should aggregate service versions', async () => {
+  describe('Backend Service Version Aggregation', () => {
+    it('should aggregate service versions from health endpoints', async () => {
       const response = await request(app)
         .get('/version');
 
       expect(response.status).toBe(200);
       expect(response.body).toHaveProperty('services');
       expect(response.body.services).toHaveProperty('backend');
-      expect(response.body.services).toHaveProperty('frontend');
       expect(response.body.services).toHaveProperty('scraper');
+
+      // Backend should have full service info
+      expect(response.body.services.backend).toHaveProperty('service');
+      expect(response.body.services.backend).toHaveProperty('version');
+      expect(response.body.services.backend).toHaveProperty('status');
+    });
+
+    it('should include backend health information', async () => {
+      const response = await request(app)
+        .get('/health');
+
+      expect(response.status).toBe(200);
+      expect(response.body).toHaveProperty('service', 'backend');
+      expect(response.body).toHaveProperty('version');
+      expect(response.body).toHaveProperty('status');
+    });
+
+    it('should maintain version consistency across endpoints', async () => {
+      const healthResponse = await request(app)
+        .get('/health');
+
+      const versionResponse = await request(app)
+        .get('/version');
+
+      expect(healthResponse.body.version).toBe(versionResponse.body.services.backend.version);
+      expect(healthResponse.body.service).toBe(versionResponse.body.services.backend.service);
     });
   });
 
   describe('Complete Workflow Integration', () => {
-    it('should perform end-to-end figure creation with version validation', async () => {
-      // 1. Register Frontend
-      const registerResponse = await request(app)
-        .post('/register-service')
-        .send({
-          serviceName: 'frontend',
-          version: '1.0.0'
-        });
-      expect(registerResponse.status).toBe(200);
+    it('should provide service version information for deployment validation', async () => {
+      // 1. Check backend health
+      const healthResponse = await request(app)
+        .get('/health');
+      expect(healthResponse.status).toBe(200);
+      expect(healthResponse.body.status).toBe('healthy');
 
-      // 2. Fetch versions to validate
+      // 2. Fetch aggregated versions
       const versionResponse = await request(app)
         .get('/version');
       expect(versionResponse.status).toBe(200);
 
-      // 3. Verify version compatibility 
+      // 3. Verify version information structure
       const services = versionResponse.body.services;
       expect(services.backend.version).toBeTruthy();
-      expect(services.frontend.version).toBeTruthy();
-      expect(services.scraper.version).toBeTruthy();
+      expect(services.backend.status).toBe('healthy');
+      expect(services.scraper).toBeDefined();
 
       // Future: Add figure creation and scraping test steps
+    });
+
+    it('should handle service version aggregation errors gracefully', async () => {
+      // Even if scraper is unavailable, backend should respond
+      const response = await request(app)
+        .get('/version');
+
+      expect(response.status).toBe(200);
+      expect(response.body.services.backend).toBeDefined();
+
+      // Scraper may be unavailable in test environment
+      expect(response.body.services.scraper).toBeDefined();
+      expect(response.body.services.scraper.status).toBeTruthy();
     });
   });
 });

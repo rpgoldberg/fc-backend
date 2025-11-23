@@ -251,7 +251,7 @@ describe('FigureController', () => {
       await figureController.createFigure(mockRequest as Request, mockResponse as Response);
 
       expect(mockedAxios.post).toHaveBeenCalledWith(
-        'http://page-scraper-dev:3000/scrape/mfc',
+        'http://scraper-dev:3000/scrape/mfc',
         { url: 'https://myfigurecollection.net/item/12345' },
         expect.any(Object)
       );
