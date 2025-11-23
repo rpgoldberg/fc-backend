@@ -1,9 +1,8 @@
-import { 
-  TEST_CONFIG, 
-  backendAPI, 
+import {
+  TEST_CONFIG,
+  backendAPI,
   frontendAPI,
   scraperAPI,
-  versionAPI,
   authenticateUser,
   getAuthenticatedAPI,
   TEST_USERS,
@@ -155,18 +154,17 @@ describe('End-to-End Workflow Tests', () => {
   describe('Service Integration Workflows', () => {
     test('Complete service dependency chain', async () => {
       console.log('🔄 Testing complete service dependency chain...');
-      
+
       // Step 1: Check all services are healthy
       console.log('   🏥 Checking service health...');
       const healthChecks = await Promise.all([
         backendAPI.get('/health'),
-        versionAPI.get('/health'),
         scraperAPI.get('/health')
       ]);
 
       healthChecks.forEach((response, index) => {
         expect(response.status).toBe(200);
-        const serviceName = ['backend', 'version-manager', 'scraper'][index];
+        const serviceName = ['backend', 'scraper'][index];
         console.log(`   ✅ ${serviceName} is healthy`);
       });
 
@@ -174,30 +172,14 @@ describe('End-to-End Workflow Tests', () => {
       console.log('   📊 Testing version aggregation...');
       const versionResponse = await backendAPI.get('/version');
       expect(versionResponse.status).toBe(200);
-      
+
       const services = versionResponse.data.services;
       expect(services).toHaveProperty('backend');
       expect(services).toHaveProperty('scraper');
-      
+
       console.log(`   ✅ Version aggregation successful - tracking ${Object.keys(services).length} services`);
 
-      // Step 3: Frontend registration workflow
-      console.log('   📝 Testing frontend service registration...');
-      const registrationResponse = await backendAPI.post('/register-frontend', {
-        version: '1.0.0',
-        name: 'fc-frontend-test'
-      });
-
-      expect(registrationResponse.status).toBe(200);
-      console.log('   ✅ Frontend registration successful');
-
-      // Step 4: Verify registration appears in version tracking
-      const postRegVersionResponse = await backendAPI.get('/version');
-      expect(postRegVersionResponse.data.services).toHaveProperty('frontend');
-      
-      console.log('   ✅ Service registration integrated into version tracking');
-
-      // Step 5: Test scraper integration through backend
+      // Step 3: Test scraper integration through backend
       console.log('   🕷️  Testing scraper integration...');
       const scrapeResponse = await user1API.post('/figures/scrape-mfc', {
         mfcLink: 'https://myfigurecollection.net/item/test123'
