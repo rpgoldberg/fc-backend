@@ -86,13 +86,13 @@ echo ""
 echo "🧪 Running E2E tests..."
 echo ""
 
-# Run tests (always rebuild to pick up package.json changes)
+# Run tests (rebuild test container if not --no-build to pick up package.json changes)
 TEST_EXIT_CODE=0
-if [ "$NO_BUILD" = true ]; then
-  docker-compose -f docker-compose.e2e.yml run --rm e2e-tests || TEST_EXIT_CODE=$?
-else
-  docker-compose -f docker-compose.e2e.yml run --rm --build e2e-tests || TEST_EXIT_CODE=$?
+if [ "$NO_BUILD" = false ]; then
+  echo "📦 Building test runner container..."
+  docker-compose -f docker-compose.e2e.yml build e2e-tests
 fi
+docker-compose -f docker-compose.e2e.yml run --rm e2e-tests || TEST_EXIT_CODE=$?
 
 echo ""
 
