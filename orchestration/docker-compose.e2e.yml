@@ -24,7 +24,7 @@ services:
   # Backend API service
   backend:
     build:
-      context: ../fc-backend
+      context: ..
       dockerfile: Dockerfile
     container_name: e2e-backend
     restart: "no"
@@ -52,7 +52,7 @@ services:
   # Scraper service
   scraper:
     build:
-      context: ../scraper
+      context: ../../scraper
       dockerfile: Dockerfile
     container_name: e2e-scraper
     restart: "no"
@@ -74,7 +74,7 @@ services:
   # Frontend (for frontend integration tests)
   frontend:
     build:
-      context: ../fc-frontend
+      context: ../../fc-frontend
       dockerfile: Dockerfile
       args:
         - REACT_APP_API_URL=http://backend:5055
@@ -94,7 +94,7 @@ services:
   # E2E Test Runner - runs cross-service tests from backend
   e2e-tests:
     build:
-      context: ../fc-backend
+      context: ..
       dockerfile: Dockerfile
     container_name: e2e-test-runner
     restart: "no"
