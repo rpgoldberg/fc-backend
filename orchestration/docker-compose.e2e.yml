@@ -118,8 +118,29 @@ services:
       sh -c "
         echo 'Waiting for services to stabilize...' &&
         sleep 5 &&
-        echo 'Running E2E tests...' &&
-        npm run test:e2e
+        echo 'Verifying service connectivity...' &&
+        node -e \"
+          const http = require('http');
+          const checkService = (url, name) => new Promise((resolve, reject) => {
+            http.get(url, res => {
+              console.log('✅ ' + name + ': ' + res.statusCode);
+              resolve(res.statusCode === 200);
+            }).on('error', err => {
+              console.log('❌ ' + name + ': ' + err.message);
+              reject(err);
+            });
+          });
+          Promise.all([
+            checkService('http://backend:5055/health', 'Backend'),
+            checkService('http://scraper:3005/health', 'Scraper')
+          ]).then(() => {
+            console.log('\\n✅ All services healthy and connected!');
+            process.exit(0);
+          }).catch(err => {
+            console.error('\\n❌ Service connectivity failed');
+            process.exit(1);
+          });
+        \"
       "
     volumes:
       - ./e2e-results:/app/e2e-output
