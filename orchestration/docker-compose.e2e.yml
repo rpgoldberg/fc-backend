@@ -97,6 +97,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      target: development
     container_name: e2e-test-runner
     restart: "no"
     environment:
