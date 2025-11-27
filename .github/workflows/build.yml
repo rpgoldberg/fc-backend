@@ -27,10 +27,18 @@ jobs:
       - name: Run linter
         run: npm run lint || true
 
-      - name: Run unit tests
-        run: npm run test:ci
+      - name: Run unit tests with coverage
+        run: npm run test:ci -- --coverage
         env:
           TEST_MODE: memory
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage/lcov.info
+          flags: backend
+          fail_ci_if_error: false
+          verbose: true
 
   build:
     name: Build Application
