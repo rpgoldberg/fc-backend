@@ -1,12 +1,12 @@
 name: E2E Tests
 
+# NOTE: Cross-service E2E tests belong in figure-collector-integration-tests repo
+# This workflow is for local development convenience only (run via workflow_dispatch)
+# Consumer (integration-tests) owns the cross-service test orchestration
 on:
-  # Run on PRs to main branches
-  pull_request:
-    branches: [develop, main]
-  # Manual trigger for testing
+  # Manual trigger for local development testing
   workflow_dispatch:
-  # Can be called from other workflows
+  # Can be called from other workflows (e.g., from integration-tests repo)
   workflow_call:
 
 jobs:
@@ -51,5 +51,5 @@ jobs:
         if: failure()
         run: |
           cd orchestration
-          docker-compose -f docker-compose.e2e.yml logs --tail=100
-          docker-compose -f docker-compose.e2e.yml down -v
+          docker compose -f docker-compose.e2e.yml logs --tail=100
+          docker compose -f docker-compose.e2e.yml down -v

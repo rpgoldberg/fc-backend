@@ -40,15 +40,15 @@ echo ""
 
 # Clean up any existing containers
 echo "🧹 Cleaning up existing containers..."
-docker-compose -f docker-compose.e2e.yml down -v 2>/dev/null || true
+docker compose -f docker-compose.e2e.yml down -v 2>/dev/null || true
 
 # Build and start
 if [ "$NO_BUILD" = true ]; then
   echo "📦 Starting services (no rebuild)..."
-  docker-compose -f docker-compose.e2e.yml up -d mongodb backend scraper frontend
+  docker compose -f docker-compose.e2e.yml up -d mongodb backend scraper frontend
 else
   echo "🔨 Building and starting services..."
-  docker-compose -f docker-compose.e2e.yml up -d --build mongodb backend scraper frontend
+  docker compose -f docker-compose.e2e.yml up -d --build mongodb backend scraper frontend
 fi
 
 # Wait for services to be healthy
@@ -77,8 +77,8 @@ if [ $WAITED -ge $MAX_WAIT ]; then
   echo "❌ Services failed to become healthy within ${MAX_WAIT}s"
   echo ""
   echo "📋 Service logs:"
-  docker-compose -f docker-compose.e2e.yml logs --tail=50
-  docker-compose -f docker-compose.e2e.yml down -v
+  docker compose -f docker-compose.e2e.yml logs --tail=50
+  docker compose -f docker-compose.e2e.yml down -v
   exit 1
 fi
 
@@ -90,9 +90,9 @@ echo ""
 TEST_EXIT_CODE=0
 if [ "$NO_BUILD" = false ]; then
   echo "📦 Building test runner container..."
-  docker-compose -f docker-compose.e2e.yml build e2e-tests
+  docker compose -f docker-compose.e2e.yml build e2e-tests
 fi
-docker-compose -f docker-compose.e2e.yml run --rm e2e-tests || TEST_EXIT_CODE=$?
+docker compose -f docker-compose.e2e.yml run --rm e2e-tests || TEST_EXIT_CODE=$?
 
 echo ""
 
@@ -105,10 +105,10 @@ if [ "$KEEP_RUNNING" = true ]; then
   echo "   Scraper:  http://localhost:3005"
   echo "   MongoDB:  localhost:27018"
   echo ""
-  echo "   To stop: docker-compose -f docker-compose.e2e.yml down -v"
+  echo "   To stop: docker compose -f docker-compose.e2e.yml down -v"
 else
   echo "🧹 Cleaning up..."
-  docker-compose -f docker-compose.e2e.yml down -v
+  docker compose -f docker-compose.e2e.yml down -v
 fi
 
 if [ $TEST_EXIT_CODE -eq 0 ]; then
