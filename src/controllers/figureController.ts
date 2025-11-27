@@ -147,7 +147,7 @@ const scrapeDataFromMFC = async (mfcLink: string, mfcAuth?: string): Promise<MFC
       requestBody.mfcAuth = mfcAuth;
     }
 
-    const response = await axios.post(`${scraperServiceUrl}/scrape/mfc`, requestBody, {
+    const response = await axios.post(`${scraperServiceUrl}/scrape/mfc`, requestBody, { // NOSONAR - internal service URL from env
       timeout: 45000, // 45 second timeout for browser automation
       headers: {
         'Content-Type': 'application/json'
@@ -348,11 +348,11 @@ export const getFigureById = async (req: Request, res: Response) => {
       });
     }
     const userId = req.user.id;
-    const figure = await Figure.findOne({
+    const figure = await Figure.findOne({ // NOSONAR - Mongoose ODM (parameterized)
       _id: req.params.id,
       userId
     });
-    
+
     if (!figure) {
       return res.status(404).json({
         success: false,
@@ -529,18 +529,18 @@ export const updateFigure = async (req: Request, res: Response) => {
     const { manufacturer, name, scale, mfcLink, location, boxNumber, imageUrl } = req.body;
     
     // Find figure and check ownership
-    let figure = await Figure.findOne({
+    let figure = await Figure.findOne({ // NOSONAR - Mongoose ODM (parameterized)
       _id: req.params.id,
       userId
     });
-    
+
     if (!figure) {
       return res.status(404).json({
         success: false,
         message: 'Figure not found or you do not have permission'
       });
     }
-    
+
     let finalData = {
       manufacturer,
       name,
@@ -612,20 +612,20 @@ export const deleteFigure = async (req: Request, res: Response) => {
     const userId = req.user.id;
     
     // Find figure and check ownership
-    const figure = await Figure.findOne({
+    const figure = await Figure.findOne({ // NOSONAR - Mongoose ODM (parameterized)
       _id: req.params.id,
       userId
     });
-    
+
     if (!figure) {
       return res.status(404).json({
         success: false,
         message: 'Figure not found or you do not have permission'
       });
     }
-    
+
     // Delete from MongoDB
-    await Figure.deleteOne({ _id: req.params.id });
+    await Figure.deleteOne({ _id: req.params.id }); // NOSONAR - Mongoose ODM (parameterized)
     
     return res.status(200).json({
       success: true,

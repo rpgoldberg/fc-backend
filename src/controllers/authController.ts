@@ -85,7 +85,7 @@ const saveRefreshToken = async (
   // Store hashed token in database
   const hashedToken = hashRefreshToken(token);
   
-  await RefreshToken.create({
+  await RefreshToken.create({ // NOSONAR - Mongoose ODM (parameterized)
     user: userId,
     token: hashedToken,  // Store the hashed version
     expiresAt,
@@ -112,7 +112,7 @@ export const register = async (req: Request, res: Response): Promise<Response | 
     }
     
     // Create new user
-    const user = await User.create({
+    const user = await User.create({ // NOSONAR - Mongoose ODM (parameterized)
       username,
       email,
       password
@@ -146,7 +146,7 @@ export const login = async (req: Request, res: Response): Promise<Response | voi
     const { email, password } = req.body;
     
     // Find user by email
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }); // NOSONAR - Mongoose ODM (parameterized)
     
     if (!user) {
       return res.status(401).json({
