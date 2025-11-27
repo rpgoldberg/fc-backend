@@ -55,7 +55,7 @@ app.get('/health', (req, res) => {
 // Version endpoint - aggregates versions from all services via their /health endpoints
 app.get('/version', async (req, res) => {
   try {
-    const scraperUrl = process.env.SCRAPER_SERVICE_URL || 'http://scraper:3000';
+    const scraperUrl = process.env.SCRAPER_SERVICE_URL || 'http://scraper:3000'; // NOSONAR - internal Docker network
 
     // Backend version (self)
     const backend = {
