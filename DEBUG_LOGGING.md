@@ -9,7 +9,7 @@ All Figure Collector services include production-safe debug logging that can be 
 - `DEBUG=*` - Enable all debug logs
 - `DEBUG=backend:*` - All backend debug logs
 - `DEBUG=frontend:*` - All frontend debug logs
-- `DEBUG=scraper:*` - All page-scraper debug logs
+- `DEBUG=scraper:*` - All scraper debug logs
 - `DEBUG=version:*` - All version-manager debug logs
 
 ### Service-Specific Namespaces
@@ -59,14 +59,14 @@ Update your `docker-compose.yml`:
 ```yaml
 services:
   backend:
-    image: figure-collector-backend:latest
+    image: fc-backend:latest
     environment:
       - DEBUG=backend:*
       - SERVICE_AUTH_TOKEN_DEBUG=true
       # ... other env vars
 
   frontend:
-    image: figure-collector-frontend:latest
+    image: fc-frontend:latest
     environment:
       - DEBUG=frontend:auth,frontend:api
       # ... other env vars
@@ -74,7 +74,7 @@ services:
 
 ### Docker Run
 ```bash
-docker run -e DEBUG=backend:* -e SERVICE_AUTH_TOKEN_DEBUG=true figure-collector-backend
+docker run -e DEBUG=backend:* -e SERVICE_AUTH_TOKEN_DEBUG=true fc-backend
 ```
 
 ### Kubernetes/Helm

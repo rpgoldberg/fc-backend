@@ -3,6 +3,7 @@ import cors from 'cors';
 import figureRoutes from '../../src/routes/figureRoutes';
 import userRoutes from '../../src/routes/userRoutes';
 import authRoutes from '../../src/routes/authRoutes';
+import searchRoutes from '../../src/routes/searchRoutes';
 
 // Create test app
 export const createTestApp = () => {
@@ -17,75 +18,33 @@ export const createTestApp = () => {
   app.use('/auth', authRoutes);
   app.use('/figures', figureRoutes);
   app.use('/users', userRoutes);
+  app.use('/api/search', searchRoutes);
 
-  // Health check endpoint
+  // Health check endpoint - updated to match new format
   app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok' });
+    res.status(200).json({
+      service: 'backend',
+      version: '1.0.0-test',
+      status: 'healthy'
+    });
   });
 
-  // Service registration and version endpoints for integration tests
-  let serviceVersions = {
-    frontend: {
-      name: "figure-collector-frontend",
-      version: "unknown",
-      status: "not-registered"
-    }
-  };
-
-  app.post('/register-service', (req, res) => {
-    try {
-      const { serviceName, version, name } = req.body;
-      
-      if (!serviceName || version === undefined || version === null) {
-        return res.status(400).json({ error: 'serviceName and version are required' });
-      }
-      
-      if (serviceName === 'frontend') {
-        serviceVersions.frontend = {
-          name: name || "figure-collector-frontend",
-          version: version,
-          status: "ok"
-        };
-        return res.json({ success: true, message: 'Service registered successfully' });
-      } else {
-        return res.status(400).json({ error: 'Only frontend service registration is currently supported' });
-      }
-    } catch (error: any) {
-      return res.status(500).json({ error: 'Failed to register service' });
-    }
-  });
-
-  // Add endpoint to reset service state for test isolation
-  app.post('/test-reset-services', (req, res) => {
-    serviceVersions = {
-      frontend: {
-        name: "figure-collector-frontend",
-        version: "unknown", 
-        status: "not-registered"
-      }
-    };
-    return res.json({ success: true, message: 'Service state reset' });
-  });
-
+  // Version endpoint - updated to match new aggregation format
   app.get('/version', async (req, res) => {
     try {
-      const versionInfo: any = {
-        application: {
-          name: "figure-collector-services",
-          version: "1.0.0-test",
-          releaseDate: "2024-01-01"
-        },
+      // Simplified version for testing - just returns backend info
+      // Real implementation would fetch scraper health
+      const versionInfo = {
         services: {
           backend: {
-            name: "figure-collector-backend",
-            version: "1.0.0-test",
-            status: "ok"
+            service: 'backend',
+            version: '1.0.0-test',
+            status: 'healthy'
           },
-          frontend: serviceVersions.frontend,
           scraper: {
-            name: "page-scraper",
-            version: "unknown",
-            status: "not-checked"
+            service: 'scraper',
+            version: 'unknown',
+            status: 'unavailable'
           }
         }
       };

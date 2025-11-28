@@ -1,19 +1,22 @@
 {
-  "name": "figure-collector-backend",
-  "version": "2.0.2",
+  "name": "fc-backend",
+  "version": "2.1.1",
   "description": "Backend API for figure collection management",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "test": "NODE_OPTIONS=--experimental-vm-modules npx jest --passWithNoTests --verbose --bail=false --runInBand",
-    "test:memory": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory npx jest --passWithNoTests --verbose --bail=false --runInBand",
-    "test:atlas": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=atlas npx jest --passWithNoTests --verbose --bail=false --runInBand",
-    "test:coverage": "jest --coverage",
-    "test:watch": "jest --watch",
-    "test:search": "jest tests/controllers/figureController.test.ts tests/integration/figureRoutes.test.ts --testNamePattern='search|Search'",
-    "test:inter-service": "NODE_OPTIONS=--experimental-vm-modules npx jest tests/integration/inter-service --runInBand"
+    "dev": "ts-node-dev --respawn --transpile-only -r dotenv/config src/index.ts",
+    "lint": "echo 'No linter configured'",
+    "test": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory node node_modules/jest/bin/jest.js --testPathIgnorePatterns='cross-service|inter-service|performance' --passWithNoTests --verbose --bail=false --runInBand",
+    "test:unit": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory node node_modules/jest/bin/jest.js tests/unit tests/controllers tests/models tests/middleware --passWithNoTests --verbose --runInBand",
+    "test:integration": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory node node_modules/jest/bin/jest.js tests/integration --testPathIgnorePatterns='cross-service' --passWithNoTests --verbose --runInBand",
+    "test:e2e": "NODE_OPTIONS=--experimental-vm-modules node node_modules/jest/bin/jest.js tests/integration/cross-service tests/integration/inter-service --passWithNoTests --verbose --runInBand",
+    "test:performance": "NODE_OPTIONS=--experimental-vm-modules node node_modules/jest/bin/jest.js tests/performance --passWithNoTests --verbose --runInBand",
+    "test:all": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory node node_modules/jest/bin/jest.js --passWithNoTests --verbose --bail=false --runInBand",
+    "test:coverage": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory node node_modules/jest/bin/jest.js --coverage --testPathIgnorePatterns='cross-service|inter-service|performance'",
+    "test:watch": "node node_modules/jest/bin/jest.js --watch",
+    "test:ci": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory node node_modules/jest/bin/jest.js --ci --coverage --testPathIgnorePatterns='cross-service|inter-service|performance'"
   },
   "dependencies": {
     "axios": "^1.12.0",
@@ -22,6 +25,7 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.2.1",
     "joi": "^18.0.1",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.19.2"

@@ -1,0 +1,15 @@
+# Cloudflare Tunnel configuration example
+# Replace YOUR_TUNNEL_ID with the ID from `cloudflared tunnel create figure-collector`
+# Replace yourdomain.com with your actual domain
+
+tunnel: YOUR_TUNNEL_ID
+credentials-file: ~/.cloudflared/YOUR_TUNNEL_ID.json
+
+ingress:
+  - hostname: figures.yourdomain.com
+    service: http://figure-server:5051
+  - hostname: api.figures.yourdomain.com
+    service: http://figure-server:5050
+  - hostname: scraper.figures.yourdomain.com
+    service: http://figure-server:3000
+  - service: http_status:404

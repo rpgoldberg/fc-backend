@@ -5,12 +5,13 @@ import jwt from 'jsonwebtoken';
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters-long';
 process.env.JWT_REFRESH_SECRET = 'test-refresh-secret-that-is-at-least-32-characters';
 process.env.NODE_ENV = 'test';
-process.env.MONGODB_URI = 'mongodb://localhost:27017/figure-collector-test';
+process.env.MONGODB_URI = 'mongodb://localhost:27017/fc-test';
+process.env.SCRAPER_SERVICE_URL = 'http://scraper-dev:3000';
 
 // Setup test database before all tests
 beforeAll(async () => {
   // Connect to test database
-  const testDbUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/figure-collector-test';
+  const testDbUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/fc-test';
   
   if (mongoose.connection.readyState === 0) {
     try {

@@ -6,7 +6,7 @@ This comprehensive testing solution addresses the MongoDB Atlas Search functiona
 
 ## Problem Statement
 
-The `searchFigures` function in the figure-collector-backend uses MongoDB Atlas Search with `$search` aggregation operators:
+The `searchFigures` function in the fc-backend uses MongoDB Atlas Search with `$search` aggregation operators:
 
 - **Index**: `figures`
 - **Search Fields**: `manufacturer`, `name`, `location`, `boxNumber`

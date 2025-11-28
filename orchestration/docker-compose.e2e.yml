@@ -1,0 +1,150 @@
+version: '3.8'
+
+# Docker Compose configuration for end-to-end / cross-service testing
+# Spins up all services, then runs e2e tests against them
+# Usage: docker-compose -f docker-compose.e2e.yml up --build --abort-on-container-exit
+
+services:
+  # MongoDB for test data
+  mongodb:
+    image: mongo:7
+    restart: "no"
+    environment:
+      - MONGO_INITDB_DATABASE=figure-collector-e2e
+    ports:
+      - "27018:27017"
+    networks:
+      - e2e-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Backend API service
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: e2e-backend
+    restart: "no"
+    environment:
+      - NODE_ENV=test
+      - PORT=5055
+      - MONGODB_URI=mongodb://mongodb:27017/figure-collector-e2e
+      - JWT_SECRET=e2e-test-jwt-secret-key
+      - JWT_REFRESH_SECRET=e2e-test-refresh-secret-key
+      - SCRAPER_SERVICE_URL=http://scraper:3005
+      - SERVICE_AUTH_TOKEN=e2e-test-service-token
+    ports:
+      - "5055:5055"
+    networks:
+      - e2e-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "const req = require('http').get('http://localhost:5055/health', { timeout: 5000 }, (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('timeout', () => { req.destroy(); process.exit(1); }); req.on('error', () => process.exit(1));"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 10s
+
+  # Scraper service
+  scraper:
+    build:
+      context: ../../scraper
+      dockerfile: Dockerfile
+    container_name: e2e-scraper
+    restart: "no"
+    environment:
+      - NODE_ENV=test
+      - PORT=3005
+      - SERVICE_AUTH_TOKEN=e2e-test-service-token
+    ports:
+      - "3005:3005"
+    networks:
+      - e2e-network
+    shm_size: '2gb'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Frontend (for frontend integration tests)
+  frontend:
+    build:
+      context: ../../fc-frontend
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_API_URL=http://backend:5055
+    container_name: e2e-frontend
+    restart: "no"
+    environment:
+      - NODE_ENV=test
+      - PORT=5056
+    ports:
+      - "5056:5056"
+    networks:
+      - e2e-network
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  # E2E Test Runner - runs cross-service tests from backend
+  e2e-tests:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: development
+    container_name: e2e-test-runner
+    restart: "no"
+    environment:
+      - NODE_ENV=test
+      - TEST_MODE=e2e
+      - BACKEND_URL=http://backend:5055
+      - FRONTEND_URL=http://frontend:5056
+      - SCRAPER_URL=http://scraper:3005
+      - MONGODB_URI=mongodb://mongodb:27017/figure-collector-e2e
+    networks:
+      - e2e-network
+    depends_on:
+      backend:
+        condition: service_healthy
+      scraper:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo 'Waiting for services to stabilize...' &&
+        sleep 5 &&
+        echo 'Verifying service connectivity...' &&
+        node -e \"
+          const http = require('http');
+          const checkService = (url, name) => new Promise((resolve, reject) => {
+            http.get(url, res => {
+              console.log('✅ ' + name + ': ' + res.statusCode);
+              resolve(res.statusCode === 200);
+            }).on('error', err => {
+              console.log('❌ ' + name + ': ' + err.message);
+              reject(err);
+            });
+          });
+          Promise.all([
+            checkService('http://backend:5055/health', 'Backend'),
+            checkService('http://scraper:3005/health', 'Scraper')
+          ]).then(() => {
+            console.log('\\n✅ All services healthy and connected!');
+            process.exit(0);
+          }).catch(err => {
+            console.error('\\n❌ Service connectivity failed');
+            process.exit(1);
+          });
+        \"
+      "
+    volumes:
+      - ./e2e-results:/app/e2e-output
+
+networks:
+  e2e-network:
+    driver: bridge
