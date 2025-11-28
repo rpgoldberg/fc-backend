@@ -6,7 +6,9 @@ import {
   refresh,
   logout,
   logoutAll,
-  getSessions
+  getSessions,
+  getProfile,
+  updateProfile
 } from '../controllers/authController';
 import {
   validateRequest,
@@ -77,6 +79,18 @@ router.post('/logout-all',
 router.get('/sessions',
   protect,
   getSessions
+);
+
+// Profile routes
+router.get('/profile',
+  protect,
+  getProfile
+);
+
+router.put('/profile',
+  protect,
+  validateContentType(['application/json']),
+  updateProfile
 );
 
 export default router;
