@@ -388,7 +388,7 @@ describe('Admin Routes Integration', () => {
   });
 
   describe('Public Config Access', () => {
-    describe('GET /api/config/:key', () => {
+    describe('GET /config/:key', () => {
       it('should get a public config without auth', async () => {
         await SystemConfig.create({
           key: 'public_script',
@@ -399,7 +399,7 @@ describe('Admin Routes Integration', () => {
         });
 
         const response = await request(app)
-          .get('/api/config/public_script')
+          .get('/config/public_script')
           .expect(200);
 
         expect(response.body.success).toBe(true);
@@ -421,7 +421,7 @@ describe('Admin Routes Integration', () => {
         });
 
         const response = await request(app)
-          .get('/api/config/private_config')
+          .get('/config/private_config')
           .expect(404);
 
         expect(response.body.message).toBe('Config not found or not public: private_config');
@@ -429,7 +429,7 @@ describe('Admin Routes Integration', () => {
 
       it('should return 404 for non-existent config', async () => {
         const response = await request(app)
-          .get('/api/config/nonexistent')
+          .get('/config/nonexistent')
           .expect(404);
 
         expect(response.body.message).toBe('Config not found or not public: nonexistent');
@@ -476,7 +476,7 @@ describe('Admin Routes Integration', () => {
 
       // 5. Read the config (public)
       const publicResponse = await request(app)
-        .get('/api/config/mfc_cookies')
+        .get('/config/mfc_cookies')
         .expect(200);
 
       expect(publicResponse.body.data.value).toBe('["PHPSESSID", "sesUID", "sesDID"]');
@@ -507,7 +507,7 @@ describe('Admin Routes Integration', () => {
 
       // 9. Verify deleted
       await request(app)
-        .get('/api/config/mfc_cookies')
+        .get('/config/mfc_cookies')
         .expect(404);
     });
   });
@@ -635,7 +635,7 @@ describe('Admin Routes Integration', () => {
       } as any);
 
       const response = await request(app)
-        .get('/api/config/public_key')
+        .get('/config/public_key')
         .expect(500);
 
       expect(response.body).toEqual({

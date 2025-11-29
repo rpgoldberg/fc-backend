@@ -43,7 +43,7 @@ app.use('/figures', figureRoutes);
 app.use('/users', userRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/admin', adminRoutes);
-app.use('/api', publicConfigRouter);
+app.use('/', publicConfigRouter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

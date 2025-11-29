@@ -147,7 +147,7 @@ Admin functionality for system configuration and bootstrap:
 - `PUT /admin/config/:key` - Create or update a config (admin only)
   - Body: `{ value: string, type?: 'script'|'markdown'|'json'|'text', description?: string, isPublic?: boolean }`
 - `DELETE /admin/config/:key` - Delete a config (admin only)
-- `GET /api/config/:key` - Get a public config (no auth required)
+- `GET /config/:key` - Get a public config (no auth required)
 
 **Config Key Format**: Must be lowercase, start with a letter, and contain only alphanumeric characters and underscores (e.g., `mfc_cookie_script`).
 
