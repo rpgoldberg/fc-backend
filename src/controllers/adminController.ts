@@ -266,7 +266,7 @@ export const deleteConfig = async (req: Request, res: Response): Promise<Respons
 
 /**
  * Get a public config by key (no auth required)
- * GET /api/config/:key
+ * GET /config/:key
  */
 export const getPublicConfig = async (req: Request, res: Response): Promise<Response> => {
   try {

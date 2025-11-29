@@ -21,7 +21,7 @@ export const createTestApp = () => {
   app.use('/users', userRoutes);
   app.use('/api/search', searchRoutes);
   app.use('/admin', adminRoutes);
-  app.use('/api', publicConfigRouter);
+  app.use('/', publicConfigRouter);
 
   // Health check endpoint - updated to match new format
   app.get('/health', (req, res) => {

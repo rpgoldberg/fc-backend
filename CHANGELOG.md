@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic Admin Config System**: New API for managing runtime configuration
   - `POST /admin/bootstrap` - Grant admin privileges using secret bootstrap token
   - `GET/PUT/DELETE /admin/config/:key` - Admin-only CRUD for system configs
-  - `GET /api/config/:key` - Public endpoint for retrieving public configs
+  - `GET /config/:key` - Public endpoint for retrieving public configs
   - SystemConfig model supporting script, markdown, json, and text types
   - Key format validation (lowercase, alphanumeric with underscores)
 

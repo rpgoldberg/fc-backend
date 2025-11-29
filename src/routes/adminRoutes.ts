@@ -54,7 +54,7 @@ router.delete('/config/:key', adminConfigLimiter, protect, admin, deleteConfig);
 
 export default router;
 
-// Separate router for public config access (mounted at /api)
+// Separate router for public config access (mounted at /)
 export const publicConfigRouter = express.Router();
 
 // Public config rate limiter (more generous for public access)
@@ -67,5 +67,5 @@ const publicConfigLimiter = rateLimit({
   skip: () => isTestEnv,
 });
 
-// GET /api/config/:key - Get public config (no auth)
+// GET /config/:key - Get public config (no auth)
 publicConfigRouter.get('/config/:key', publicConfigLimiter, getPublicConfig);
