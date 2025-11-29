@@ -5,6 +5,25 @@ All notable changes to the fc-backend service will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2025-11-28
+
+### Added
+- **Dynamic Admin Config System**: New API for managing runtime configuration
+  - `POST /admin/bootstrap` - Grant admin privileges using secret bootstrap token
+  - `GET/PUT/DELETE /admin/config/:key` - Admin-only CRUD for system configs
+  - `GET /api/config/:key` - Public endpoint for retrieving public configs
+  - SystemConfig model supporting script, markdown, json, and text types
+  - Key format validation (lowercase, alphanumeric with underscores)
+
+### Security
+- **Timing-Safe Token Comparison**: Bootstrap token validation uses `crypto.timingSafeEqual()` to prevent timing attacks
+
+### Tests
+- Added 32 comprehensive tests for admin routes (now 400 total tests)
+- 100% line coverage on new admin controller code
+
+---
+
 ## [2.1.1] - 2025-11-28
 
 ### Added

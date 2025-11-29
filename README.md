@@ -135,6 +135,22 @@ Authentication is managed through dedicated `/auth` endpoints:
 
 **Note**: All authentication endpoints now return responses in the `data.data` structure
 
+### Admin Endpoints
+
+Admin functionality for system configuration and bootstrap:
+
+- `POST /admin/bootstrap` - Grant admin privileges using bootstrap token
+  - Body: `{ email: string, token: string }`
+  - Requires: `ADMIN_BOOTSTRAP_TOKEN` environment variable
+- `GET /admin/config` - List all system configs (admin only)
+- `GET /admin/config/:key` - Get specific config by key (admin only)
+- `PUT /admin/config/:key` - Create or update a config (admin only)
+  - Body: `{ value: string, type?: 'script'|'markdown'|'json'|'text', description?: string, isPublic?: boolean }`
+- `DELETE /admin/config/:key` - Delete a config (admin only)
+- `GET /api/config/:key` - Get a public config (no auth required)
+
+**Config Key Format**: Must be lowercase, start with a letter, and contain only alphanumeric characters and underscores (e.g., `mfc_cookie_script`).
+
 Note: The nginx frontend proxy strips `/api` prefix, so backend endpoints don't include `/api` in their paths.
 
 ### Environment Variables
@@ -155,6 +171,9 @@ See `.env.example` for complete configuration template. Run `./setup-local-env.s
 **Optional:**
 - `ACCESS_TOKEN_EXPIRY`: Access token expiration time (default: 15m)
 - `ROTATE_REFRESH_TOKENS`: Enable refresh token rotation for enhanced security (default: false)
+- `ADMIN_BOOTSTRAP_TOKEN`: Secret token for granting admin privileges via `POST /admin/bootstrap`
+  - Generate a secure token: `openssl rand -base64 32`
+  - After granting admin to your user, the token can be changed or removed
 
 **Debug Logging:**
 - `DEBUG`: Enable debug namespaces (e.g., `backend:*`, `backend:auth`, `backend:registration`)
@@ -191,7 +210,7 @@ Token Response Structure:
 
 ## 🧪 Testing
 
-The backend includes extensive test infrastructure with enhanced Docker testing, comprehensive test suites, and robust automation scripts. We now have 309/309 tests passing, covering multiple dimensions of application functionality across multiple test configurations. The enhanced MongoDB Memory Server provides robust, isolated testing capabilities. All tests now pass without any skipped tests, focusing on essential database connection and API functionality.
+The backend includes extensive test infrastructure with enhanced Docker testing, comprehensive test suites, and robust automation scripts. We now have 400/400 tests passing, covering multiple dimensions of application functionality across multiple test configurations. The enhanced MongoDB Memory Server provides robust, isolated testing capabilities. All tests now pass without any skipped tests, focusing on essential database connection and API functionality.
 
 ### Test Coverage
 
