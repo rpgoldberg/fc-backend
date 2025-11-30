@@ -6,6 +6,7 @@ import figureRoutes from './routes/figureRoutes';
 import userRoutes from './routes/userRoutes';
 import authRoutes from './routes/authRoutes';
 import searchRoutes from './routes/searchRoutes';
+import adminRoutes, { publicConfigRouter } from './routes/adminRoutes';
 import { connectDB } from './config/db';
 import { globalErrorHandler } from './middleware/validationMiddleware';
 import * as packageJson from '../package.json';
@@ -41,6 +42,8 @@ app.use('/auth', authRoutes);
 app.use('/figures', figureRoutes);
 app.use('/users', userRoutes);
 app.use('/api/search', searchRoutes);
+app.use('/admin', adminRoutes);
+app.use('/', publicConfigRouter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
