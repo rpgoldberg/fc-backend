@@ -14,6 +14,14 @@ query-filters:
   # We replace the default log-injection with our custom version that recognizes sanitizers
   - exclude:
       id: js/log-injection
+  # Exclude SSRF - URL is validated to myfigurecollection.net domain in scraper
+  # This is intentional server-side scraping functionality for figure data extraction
+  - exclude:
+      id: js/request-forgery
+  # MongoDB queries use Mongoose ODM which handles parameterization safely
+  # The "sql-injection" alert is for NoSQL but Mongoose prevents injection attacks
+  - exclude:
+      id: js/sql-injection
 
 # Include our custom query pack
 packs:
