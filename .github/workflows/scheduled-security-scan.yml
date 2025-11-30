@@ -148,21 +148,20 @@ jobs:
               issue.title.includes(serviceName) && issue.title.includes('Security:')
             );
 
-            const body = `
-            ${report}
+            const body = report + `
 
-            ---
-            **Scan Date**: ${new Date().toISOString()}
-            **Image**: ghcr.io/rpgoldberg/${serviceName}:${{ matrix.service.tag }}
-            **Threshold**: ${process.env.SEVERITY_THRESHOLD}
+---
+**Scan Date**: ${new Date().toISOString()}
+**Image**: ghcr.io/rpgoldberg/${serviceName}:${{ matrix.service.tag }}
+**Threshold**: ${process.env.SEVERITY_THRESHOLD}
 
-            ### Recommended Actions:
-            1. Review the vulnerabilities in detail
-            2. Update base images if available
-            3. Upgrade vulnerable dependencies
-            4. Apply security patches
+### Recommended Actions:
+1. Review the vulnerabilities in detail
+2. Update base images if available
+3. Upgrade vulnerable dependencies
+4. Apply security patches
 
-            This issue was automatically created by the scheduled security scan workflow.
+This issue was automatically created by the scheduled security scan workflow.
             `;
 
             if (existingIssue) {
