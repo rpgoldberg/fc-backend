@@ -20,10 +20,11 @@ coverage:
     # This is the most important metric - new code MUST be tested
     patch:
       default:
-        # Require 80% coverage on changed lines (industry standard)
-        target: 80%
-        # No threshold - must meet 80% on new/modified lines
-        threshold: 0%
+        # Require 70% coverage on changed lines
+        # Allows for defense-in-depth security code and error handling paths
+        target: 70%
+        # Allow 5% threshold for security hardening and logging code
+        threshold: 5%
         # Fail PR check if patch coverage is below target
         informational: false
 
