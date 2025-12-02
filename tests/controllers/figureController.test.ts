@@ -995,4 +995,408 @@ describe('FigureController', () => {
       }));
     });
   });
+
+  describe('Smart Scraping - needsScrape Conditional', () => {
+    it('should skip scraping when all fields are already provided', async () => {
+      mockRequest.body = {
+        manufacturer: 'Good Smile Company',
+        name: 'Hatsune Miku',
+        scale: '1/8',
+        imageUrl: 'https://example.com/image.jpg',
+        mfcLink: 'https://myfigurecollection.net/item/12345',
+        location: 'Shelf A',
+        boxNumber: 'Box 1'
+      };
+
+      const mockCreatedFigure = {
+        _id: 'fig123',
+        ...mockRequest.body,
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.create = jest.fn().mockResolvedValue(mockCreatedFigure);
+
+      await figureController.createFigure(mockRequest as Request, mockResponse as Response);
+
+      // Scraper should NOT be called when all fields are provided
+      expect(mockedAxios.post).not.toHaveBeenCalled();
+      expect(MockedFigure.create).toHaveBeenCalledWith({
+        manufacturer: 'Good Smile Company',
+        name: 'Hatsune Miku',
+        scale: '1/8',
+        mfcLink: 'https://myfigurecollection.net/item/12345',
+        location: 'Shelf A',
+        boxNumber: 'Box 1',
+        imageUrl: 'https://example.com/image.jpg',
+        userId: '000000000000000000000123'
+      });
+      expect(mockResponse.status).toHaveBeenCalledWith(201);
+    });
+
+    it('should scrape when any required field is missing', async () => {
+      mockRequest.body = {
+        manufacturer: 'Good Smile Company',
+        name: 'Hatsune Miku',
+        scale: '', // Missing scale - should trigger scrape
+        imageUrl: 'https://example.com/image.jpg',
+        mfcLink: 'https://myfigurecollection.net/item/12345'
+      };
+
+      const mockScrapedData = {
+        manufacturer: 'Scraped Manufacturer',
+        name: 'Scraped Name',
+        scale: '1/7',
+        imageUrl: 'https://scraped.com/image.jpg'
+      };
+
+      mockedAxios.post = jest.fn().mockResolvedValue({
+        data: {
+          success: true,
+          data: mockScrapedData
+        }
+      });
+
+      const mockCreatedFigure = {
+        _id: 'fig123',
+        manufacturer: 'Good Smile Company',
+        name: 'Hatsune Miku',
+        scale: '1/7', // Scraped because it was empty
+        imageUrl: 'https://example.com/image.jpg',
+        mfcLink: 'https://myfigurecollection.net/item/12345',
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.create = jest.fn().mockResolvedValue(mockCreatedFigure);
+
+      await figureController.createFigure(mockRequest as Request, mockResponse as Response);
+
+      // Scraper SHOULD be called when scale is missing
+      expect(mockedAxios.post).toHaveBeenCalled();
+    });
+
+    it('should pass mfcAuth to scraper when provided', async () => {
+      mockRequest.body = {
+        manufacturer: '',
+        name: '',
+        scale: '',
+        mfcLink: 'https://myfigurecollection.net/item/12345',
+        mfcAuth: 'PHPSESSID=abc123; sesUID=user456'
+      };
+
+      const mockScrapedData = {
+        manufacturer: 'Good Smile Company',
+        name: 'NSFW Figure',
+        scale: '1/6',
+        imageUrl: 'https://example.com/nsfw-image.jpg'
+      };
+
+      mockedAxios.post = jest.fn().mockResolvedValue({
+        data: {
+          success: true,
+          data: mockScrapedData
+        }
+      });
+
+      const mockCreatedFigure = {
+        _id: 'fig123',
+        ...mockScrapedData,
+        mfcLink: 'https://myfigurecollection.net/item/12345',
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.create = jest.fn().mockResolvedValue(mockCreatedFigure);
+
+      await figureController.createFigure(mockRequest as Request, mockResponse as Response);
+
+      // Verify mfcAuth was passed to the scraper
+      expect(mockedAxios.post).toHaveBeenCalledWith(
+        'http://scraper-dev:3000/scrape/mfc',
+        {
+          url: 'https://myfigurecollection.net/item/12345',
+          mfcAuth: 'PHPSESSID=abc123; sesUID=user456'
+        },
+        expect.any(Object)
+      );
+    });
+
+    it('should skip scrape on update when all fields are provided', async () => {
+      mockRequest.params = { id: 'fig123' };
+      mockRequest.body = {
+        manufacturer: 'Updated Manufacturer',
+        name: 'Updated Name',
+        scale: '1/7',
+        imageUrl: 'https://example.com/updated-image.jpg',
+        mfcLink: 'https://myfigurecollection.net/item/99999' // Different from existing
+      };
+
+      const mockExistingFigure = {
+        _id: 'fig123',
+        manufacturer: 'Old Manufacturer',
+        name: 'Old Name',
+        scale: '1/8',
+        imageUrl: 'https://example.com/old-image.jpg',
+        mfcLink: 'https://myfigurecollection.net/item/12345', // Different from new
+        userId: '000000000000000000000123'
+      };
+
+      const mockUpdatedFigure = {
+        _id: 'fig123',
+        ...mockRequest.body,
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.findOne = jest.fn().mockResolvedValue(mockExistingFigure);
+      MockedFigure.findByIdAndUpdate = jest.fn().mockResolvedValue(mockUpdatedFigure);
+
+      await figureController.updateFigure(mockRequest as Request, mockResponse as Response);
+
+      // Scraper should NOT be called when all fields are provided
+      expect(mockedAxios.post).not.toHaveBeenCalled();
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should pass mfcAuth to scraper on update when needed', async () => {
+      mockRequest.params = { id: 'fig123' };
+      mockRequest.body = {
+        manufacturer: 'Test Manufacturer',
+        name: 'Test Name',
+        scale: '', // Missing - triggers scrape
+        mfcLink: 'https://myfigurecollection.net/item/99999',
+        mfcAuth: 'PHPSESSID=xyz789'
+      };
+
+      const mockExistingFigure = {
+        _id: 'fig123',
+        manufacturer: 'Old Manufacturer',
+        name: 'Old Name',
+        mfcLink: 'https://myfigurecollection.net/item/12345', // Different
+        userId: '000000000000000000000123'
+      };
+
+      mockedAxios.post = jest.fn().mockResolvedValue({
+        data: {
+          success: true,
+          data: { scale: '1/8' }
+        }
+      });
+
+      MockedFigure.findOne = jest.fn().mockResolvedValue(mockExistingFigure);
+      MockedFigure.findByIdAndUpdate = jest.fn().mockResolvedValue({
+        ...mockExistingFigure,
+        ...mockRequest.body,
+        scale: '1/8'
+      });
+
+      await figureController.updateFigure(mockRequest as Request, mockResponse as Response);
+
+      // Verify mfcAuth was passed
+      expect(mockedAxios.post).toHaveBeenCalledWith(
+        'http://scraper-dev:3000/scrape/mfc',
+        {
+          url: 'https://myfigurecollection.net/item/99999',
+          mfcAuth: 'PHPSESSID=xyz789'
+        },
+        expect.any(Object)
+      );
+    });
+
+    it('should return NSFW auth error message when scraping requires authentication', async () => {
+      mockRequest.body = {
+        mfcLink: 'https://myfigurecollection.net/item/12345'
+      };
+
+      // Simulate NSFW auth error from scraper
+      mockedAxios.post = jest.fn().mockRejectedValue({
+        response: {
+          data: {
+            message: 'NSFW_AUTH_REQUIRED: This item requires MFC authentication'
+          }
+        }
+      });
+
+      await figureController.scrapeMFCData(mockRequest as Request, mockResponse as Response);
+
+      // Should return 500 with the auth error message passed through
+      expect(mockResponse.status).toHaveBeenCalledWith(500);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'NSFW_AUTH_REQUIRED: This item requires MFC authentication',
+        error: 'NSFW_AUTH_REQUIRED: This item requires MFC authentication'
+      });
+    });
+
+    it('should return MFC item not accessible error message', async () => {
+      mockRequest.body = {
+        mfcLink: 'https://myfigurecollection.net/item/12345'
+      };
+
+      // Simulate item not accessible error
+      mockedAxios.post = jest.fn().mockRejectedValue({
+        response: {
+          data: {
+            message: 'MFC_ITEM_NOT_ACCESSIBLE: Item no longer exists'
+          }
+        }
+      });
+
+      await figureController.scrapeMFCData(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(500);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'MFC_ITEM_NOT_ACCESSIBLE: Item no longer exists',
+        error: 'MFC_ITEM_NOT_ACCESSIBLE: Item no longer exists'
+      });
+    });
+
+    it('should use local fallback and succeed when scraper service fails', async () => {
+      mockRequest.body = {
+        mfcLink: 'https://myfigurecollection.net/item/12345'
+      };
+
+      // Scraper service fails
+      mockedAxios.post = jest.fn().mockRejectedValue(new Error('Service unavailable'));
+
+      // Local fallback succeeds with HTML response
+      const mockHtml = `
+        <html>
+          <body>
+            <div class="item-picture"><div class="main"><img src="https://example.com/image.jpg" /></div></div>
+            <span switch>TestManufacturer</span>
+            <span switch>TestName</span>
+            <div class="item-scale"><a title="Scale">1/8</a></div>
+          </body>
+        </html>
+      `;
+      mockedAxios.get = jest.fn().mockResolvedValue({
+        status: 200,
+        data: mockHtml,
+        headers: { 'content-type': 'text/html' }
+      });
+
+      await figureController.scrapeMFCData(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: true,
+        data: expect.objectContaining({
+          imageUrl: 'https://example.com/image.jpg',
+          manufacturer: 'TestManufacturer',
+          name: 'TestName'
+        })
+      });
+    });
+
+    it('should handle local fallback returning empty response data', async () => {
+      mockRequest.body = {
+        mfcLink: 'https://myfigurecollection.net/item/12345'
+      };
+
+      // Scraper service fails
+      mockedAxios.post = jest.fn().mockRejectedValue(new Error('Service unavailable'));
+
+      // Local fallback returns empty response
+      mockedAxios.get = jest.fn().mockResolvedValue({
+        status: 200,
+        data: null,
+        headers: { 'content-type': 'text/html' }
+      });
+
+      await figureController.scrapeMFCData(mockRequest as Request, mockResponse as Response);
+
+      // Should return MANUAL_EXTRACT when no data
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          imageUrl: 'MANUAL_EXTRACT:https://myfigurecollection.net/item/12345',
+          manufacturer: '',
+          name: '',
+          scale: ''
+        }
+      });
+    });
+
+    it('should detect Cloudflare challenge in local fallback response', async () => {
+      mockRequest.body = {
+        mfcLink: 'https://myfigurecollection.net/item/12345'
+      };
+
+      // Scraper service fails
+      mockedAxios.post = jest.fn().mockRejectedValue(new Error('Service unavailable'));
+
+      // Local fallback returns Cloudflare challenge page
+      mockedAxios.get = jest.fn().mockResolvedValue({
+        status: 200,
+        data: '<html><body>Just a moment... cf-challenge</body></html>',
+        headers: { 'content-type': 'text/html' }
+      });
+
+      await figureController.scrapeMFCData(mockRequest as Request, mockResponse as Response);
+
+      // Should return MANUAL_EXTRACT when Cloudflare blocked
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          imageUrl: 'MANUAL_EXTRACT:https://myfigurecollection.net/item/12345',
+          manufacturer: '',
+          name: '',
+          scale: ''
+        }
+      });
+    });
+
+    it('should handle 403 status in local fallback response', async () => {
+      mockRequest.body = {
+        mfcLink: 'https://myfigurecollection.net/item/12345'
+      };
+
+      // Scraper service fails
+      mockedAxios.post = jest.fn().mockRejectedValue(new Error('Service unavailable'));
+
+      // Local fallback returns 403
+      mockedAxios.get = jest.fn().mockResolvedValue({
+        status: 403,
+        data: '<html><body>Access Denied</body></html>',
+        headers: { 'content-type': 'text/html' }
+      });
+
+      await figureController.scrapeMFCData(mockRequest as Request, mockResponse as Response);
+
+      // Should return MANUAL_EXTRACT when 403
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          imageUrl: 'MANUAL_EXTRACT:https://myfigurecollection.net/item/12345',
+          manufacturer: '',
+          name: '',
+          scale: ''
+        }
+      });
+    });
+
+    it('should handle scraper returning empty data object', async () => {
+      mockRequest.body = {
+        mfcLink: 'https://myfigurecollection.net/item/12345'
+      };
+
+      // Scraper returns success but empty data
+      mockedAxios.post = jest.fn().mockResolvedValue({
+        data: {
+          success: true,
+          data: null
+        }
+      });
+
+      await figureController.scrapeMFCData(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: true,
+        data: {}
+      });
+    });
+  });
 });

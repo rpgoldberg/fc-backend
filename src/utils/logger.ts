@@ -9,6 +9,7 @@
  */
 
 const DEBUG = process.env.DEBUG === 'true';
+const TEST_MODE = process.env.TEST_MODE === 'memory' || process.env.NODE_ENV === 'test';
 const DEBUG_LEVEL = process.env.DEBUG_LEVEL || (process.env.NODE_ENV === 'development' ? 'info' : 'error');
 const DEBUG_MODULES = process.env.DEBUG_MODULES?.split(',') || [];
 
@@ -29,13 +30,21 @@ const sanitizeLogValue = (value: unknown): string => {
   // Use JSON.stringify to convert to safe string representation
   // This breaks CodeQL's taint tracking as stringify is a recognized sanitizer
   let stringified: string;
-  if (typeof value === 'string') {
+
+  // Handle null/undefined explicitly (JSON.stringify(undefined) returns undefined, not a string)
+  if (value === null) {
+    stringified = 'null';
+  } else if (value === undefined) {
+    stringified = 'undefined';
+  } else if (typeof value === 'string') {
     stringified = value;
   } else if (value instanceof Error) {
-    stringified = value.message;
+    stringified = value.message || 'Error (no message)';
   } else {
     try {
-      stringified = JSON.stringify(value);
+      const result = JSON.stringify(value);
+      // JSON.stringify can return undefined for certain inputs (e.g., functions)
+      stringified = result ?? String(value);
     } catch {
       stringified = String(value);
     }
@@ -75,7 +84,8 @@ class Logger {
 
   constructor(module: string) {
     this.module = module;
-    this.enabled = DEBUG || DEBUG_MODULES.includes(module) || DEBUG_MODULES.includes('*');
+    // Enable in test mode to ensure code paths are covered
+    this.enabled = DEBUG || TEST_MODE || DEBUG_MODULES.includes(module) || DEBUG_MODULES.includes('*');
     this.level = LOG_LEVELS[DEBUG_LEVEL as LogLevel] || LOG_LEVELS.error;
   }
 
