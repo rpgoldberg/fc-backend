@@ -15,16 +15,6 @@ import { createLogger } from './utils/logger';
 const logger = createLogger('MAIN');
 const registerLogger = createLogger('REGISTER');
 
-// Sanitize log input to prevent log injection attacks
-const sanitizeLogInput = (input: string | undefined, maxLength = 200): string => {
-  if (!input) return '';
-  // Remove ANSI escape sequences, newlines, and control characters
-  return input
-    .replace(/[\x00-\x1f\x7f]/g, '') // Remove control characters including newlines
-    .replace(/\x1b\[[0-9;]*m/g, '')  // Remove ANSI escape codes
-    .slice(0, maxLength);
-};
-
 dotenv.config();
 
 // Initialize Express app
@@ -37,9 +27,9 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Debug logging for all requests (with sanitization to prevent log injection)
+// Debug logging for all requests (JSON.stringify prevents log injection)
 app.use((req, res, next) => {
-  console.log('[REQUEST]', req.method, sanitizeLogInput(req.path), sanitizeLogInput(req.url), 'Host:', sanitizeLogInput(req.get('host')));
+  console.log('[REQUEST]', req.method, JSON.stringify(req.path), JSON.stringify(req.url), 'Host:', JSON.stringify(req.get('host')));
   next();
 });
 

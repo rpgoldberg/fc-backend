@@ -70,29 +70,29 @@ router.post('/logout',
   logout
 );
 
-// Protected routes (with rate limiting)
+// Protected routes (rate limiting BEFORE auth to prevent brute force)
 router.post('/logout-all',
-  protect,
   generalAuthLimiter,
+  protect,
   logoutAll
 );
 
 router.get('/sessions',
-  protect,
   generalAuthLimiter,
+  protect,
   getSessions
 );
 
-// Profile routes (with rate limiting)
+// Profile routes (rate limiting BEFORE auth)
 router.get('/profile',
-  protect,
   generalAuthLimiter,
+  protect,
   getProfile
 );
 
 router.put('/profile',
-  protect,
   generalAuthLimiter,
+  protect,
   validateContentType(['application/json']),
   updateProfile
 );
