@@ -18,9 +18,9 @@ const searchLimiter = rateLimit({
   skip: () => isTestEnv,
 });
 
-// All search routes require authentication and rate limiting
-router.use(protect);
+// All search routes are rate-limited and protected (rate limit BEFORE auth to prevent brute force)
 router.use(searchLimiter);
+router.use(protect);
 
 // Word wheel autocomplete search
 router.get('/suggestions', getSuggestions);

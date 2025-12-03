@@ -26,9 +26,9 @@ const userLimiter = rateLimit({
   skip: () => isTestEnv,
 });
 
-// All user routes are protected and rate-limited
-router.use(protect);
+// All user routes are rate-limited and protected (rate limit BEFORE auth to prevent brute force)
 router.use(userLimiter);
+router.use(protect);
 router.route('/profile')
   .get(getUserProfile)
   .put(
