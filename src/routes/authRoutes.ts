@@ -6,7 +6,9 @@ import {
   refresh,
   logout,
   logoutAll,
-  getSessions
+  getSessions,
+  getProfile,
+  updateProfile
 } from '../controllers/authController';
 import {
   validateRequest,
@@ -68,15 +70,31 @@ router.post('/logout',
   logout
 );
 
-// Protected routes
+// Protected routes (rate limiting BEFORE auth to prevent brute force)
 router.post('/logout-all',
+  generalAuthLimiter,
   protect,
   logoutAll
 );
 
 router.get('/sessions',
+  generalAuthLimiter,
   protect,
   getSessions
+);
+
+// Profile routes (rate limiting BEFORE auth)
+router.get('/profile',
+  generalAuthLimiter,
+  protect,
+  getProfile
+);
+
+router.put('/profile',
+  generalAuthLimiter,
+  protect,
+  validateContentType(['application/json']),
+  updateProfile
 );
 
 export default router;

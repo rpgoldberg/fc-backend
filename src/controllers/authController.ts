@@ -131,6 +131,7 @@ export const register = async (req: Request, res: Response): Promise<Response | 
         username: user.username,
         email: user.email,
         isAdmin: user.isAdmin,
+        colorProfile: user.colorProfile,
         accessToken,
         refreshToken
       }
@@ -178,6 +179,7 @@ export const login = async (req: Request, res: Response): Promise<Response | voi
         username: user.username,
         email: user.email,
         isAdmin: user.isAdmin,
+        colorProfile: user.colorProfile,
         accessToken,
         refreshToken
       }
@@ -322,15 +324,107 @@ export const getSessions = async (req: Request, res: Response): Promise<Response
         message: 'Not authorized'
       });
     }
-    
-    const sessions = await RefreshToken.find({ 
+
+    const sessions = await RefreshToken.find({
       user: req.user.id,
       expiresAt: { $gt: new Date() }
     }).select('deviceInfo ipAddress createdAt');
-    
+
     res.status(200).json({
       success: true,
       data: sessions
+    });
+  } catch (error: any) {
+    return handleErrorResponse(res, error);
+  }
+};
+
+// Get user profile
+export const getProfile = async (req: Request, res: Response): Promise<Response | void> => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Not authorized'
+      });
+    }
+
+    const user = await User.findById(req.user.id).select('-password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        isAdmin: user.isAdmin,
+        colorProfile: user.colorProfile,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      }
+    });
+  } catch (error: any) {
+    return handleErrorResponse(res, error);
+  }
+};
+
+// Update user profile (color preference)
+export const updateProfile = async (req: Request, res: Response): Promise<Response | void> => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Not authorized'
+      });
+    }
+
+    const { colorProfile } = req.body;
+
+    // Validate colorProfile if provided
+    const validProfiles = ['light', 'dark', 'terminal', 'surprise'];
+    if (colorProfile && !validProfiles.includes(colorProfile)) {
+      return res.status(400).json({
+        success: false,
+        message: `Invalid color profile. Must be one of: ${validProfiles.join(', ')}`
+      });
+    }
+
+    const updateData: { colorProfile?: string } = {};
+    if (colorProfile) {
+      updateData.colorProfile = colorProfile;
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        _id: user._id,
+        username: user.username,
+        email: user.email,
+        isAdmin: user.isAdmin,
+        colorProfile: user.colorProfile,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      }
     });
   } catch (error: any) {
     return handleErrorResponse(res, error);

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { register, login, refresh, logout, logoutAll } from '../../src/controllers/authController';
+import { register, login, refresh, logout, logoutAll, getProfile, updateProfile } from '../../src/controllers/authController';
 import User from '../../src/models/User';
 import RefreshToken from '../../src/models/RefreshToken';
 import jwt from 'jsonwebtoken';
@@ -477,6 +477,202 @@ describe('AuthController', () => {
         success: false,
         message: 'Not authorized'
       });
+    });
+  });
+
+  describe('getProfile', () => {
+    it('should get user profile successfully', async () => {
+      const mockUser = {
+        _id: 'user123',
+        username: 'testuser',
+        email: 'test@example.com',
+        isAdmin: false,
+        colorProfile: 'dark',
+        createdAt: new Date('2023-01-01'),
+        updatedAt: new Date('2023-01-02')
+      };
+
+      mockRequest.user = { id: 'user123' } as any;
+      MockedUser.findById = jest.fn().mockReturnValue({
+        select: jest.fn().mockResolvedValue(mockUser)
+      });
+
+      await getProfile(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedUser.findById).toHaveBeenCalledWith('user123');
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          _id: 'user123',
+          username: 'testuser',
+          email: 'test@example.com',
+          isAdmin: false,
+          colorProfile: 'dark',
+          createdAt: mockUser.createdAt,
+          updatedAt: mockUser.updatedAt
+        }
+      });
+    });
+
+    it('should return 401 when user is not authenticated', async () => {
+      mockRequest.user = undefined;
+
+      await getProfile(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Not authorized'
+      });
+    });
+
+    it('should return 404 when user not found', async () => {
+      mockRequest.user = { id: 'user123' } as any;
+      MockedUser.findById = jest.fn().mockReturnValue({
+        select: jest.fn().mockResolvedValue(null)
+      });
+
+      await getProfile(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(404);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'User not found'
+      });
+    });
+
+    it('should handle database errors', async () => {
+      mockRequest.user = { id: 'user123' } as any;
+      MockedUser.findById = jest.fn().mockReturnValue({
+        select: jest.fn().mockRejectedValue(new Error('Database error'))
+      });
+
+      await getProfile(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  describe('updateProfile', () => {
+    it('should update color profile successfully', async () => {
+      const mockUser = {
+        _id: 'user123',
+        username: 'testuser',
+        email: 'test@example.com',
+        isAdmin: false,
+        colorProfile: 'terminal',
+        createdAt: new Date('2023-01-01'),
+        updatedAt: new Date('2023-01-02')
+      };
+
+      mockRequest.user = { id: 'user123' } as any;
+      mockRequest.body = { colorProfile: 'terminal' };
+      MockedUser.findByIdAndUpdate = jest.fn().mockReturnValue({
+        select: jest.fn().mockResolvedValue(mockUser)
+      });
+
+      await updateProfile(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedUser.findByIdAndUpdate).toHaveBeenCalledWith(
+        'user123',
+        { colorProfile: 'terminal' },
+        { new: true, runValidators: true }
+      );
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: true,
+        data: {
+          _id: 'user123',
+          username: 'testuser',
+          email: 'test@example.com',
+          isAdmin: false,
+          colorProfile: 'terminal',
+          createdAt: mockUser.createdAt,
+          updatedAt: mockUser.updatedAt
+        }
+      });
+    });
+
+    it('should return 401 when user is not authenticated', async () => {
+      mockRequest.user = undefined;
+      mockRequest.body = { colorProfile: 'dark' };
+
+      await updateProfile(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Not authorized'
+      });
+    });
+
+    it('should return 400 for invalid color profile', async () => {
+      mockRequest.user = { id: 'user123' } as any;
+      mockRequest.body = { colorProfile: 'invalid-profile' };
+
+      await updateProfile(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(400);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Invalid color profile. Must be one of: light, dark, terminal, surprise'
+      });
+    });
+
+    it('should return 404 when user not found', async () => {
+      mockRequest.user = { id: 'user123' } as any;
+      mockRequest.body = { colorProfile: 'dark' };
+      MockedUser.findByIdAndUpdate = jest.fn().mockReturnValue({
+        select: jest.fn().mockResolvedValue(null)
+      });
+
+      await updateProfile(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(404);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'User not found'
+      });
+    });
+
+    it('should handle database errors', async () => {
+      mockRequest.user = { id: 'user123' } as any;
+      mockRequest.body = { colorProfile: 'dark' };
+      MockedUser.findByIdAndUpdate = jest.fn().mockReturnValue({
+        select: jest.fn().mockRejectedValue(new Error('Database error'))
+      });
+
+      await updateProfile(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(500);
+    });
+
+    it('should handle empty body gracefully', async () => {
+      const mockUser = {
+        _id: 'user123',
+        username: 'testuser',
+        email: 'test@example.com',
+        isAdmin: false,
+        colorProfile: 'light',
+        createdAt: new Date('2023-01-01'),
+        updatedAt: new Date('2023-01-02')
+      };
+
+      mockRequest.user = { id: 'user123' } as any;
+      mockRequest.body = {};
+      MockedUser.findByIdAndUpdate = jest.fn().mockReturnValue({
+        select: jest.fn().mockResolvedValue(mockUser)
+      });
+
+      await updateProfile(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedUser.findByIdAndUpdate).toHaveBeenCalledWith(
+        'user123',
+        {},
+        { new: true, runValidators: true }
+      );
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
     });
   });
 });
