@@ -585,6 +585,176 @@ describe('Auth Routes Integration', () => {
     });
   });
 
+  describe('GET /auth/profile', () => {
+    let testUser: any;
+    let authToken: string;
+
+    beforeEach(async () => {
+      testUser = new User({
+        username: 'profileuser',
+        email: 'profile@example.com',
+        password: 'password123',
+        colorProfile: 'dark'
+      });
+      await testUser.save();
+      authToken = generateTestToken(testUser._id.toString());
+    });
+
+    it('should get user profile with valid auth token', async () => {
+      const response = await request(app)
+        .get('/auth/profile')
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toEqual({
+        _id: testUser._id.toString(),
+        username: 'profileuser',
+        email: 'profile@example.com',
+        isAdmin: false,
+        colorProfile: 'dark',
+        createdAt: expect.any(String),
+        updatedAt: expect.any(String)
+      });
+    });
+
+    it('should return default colorProfile as light for new users', async () => {
+      const newUser = new User({
+        username: 'newprofileuser',
+        email: 'newprofile@example.com',
+        password: 'password123'
+      });
+      await newUser.save();
+      const newAuthToken = generateTestToken(newUser._id.toString());
+
+      const response = await request(app)
+        .get('/auth/profile')
+        .set('Authorization', `Bearer ${newAuthToken}`)
+        .expect(200);
+
+      expect(response.body.data.colorProfile).toBe('light');
+    });
+
+    it('should return 401 without auth token', async () => {
+      const response = await request(app)
+        .get('/auth/profile')
+        .expect(401);
+
+      expect(response.body).toEqual({
+        success: false,
+        message: 'Not authorized, no token'
+      });
+    });
+  });
+
+  describe('PUT /auth/profile', () => {
+    let testUser: any;
+    let authToken: string;
+
+    beforeEach(async () => {
+      testUser = new User({
+        username: 'updateprofileuser',
+        email: 'updateprofile@example.com',
+        password: 'password123',
+        colorProfile: 'light'
+      });
+      await testUser.save();
+      authToken = generateTestToken(testUser._id.toString());
+    });
+
+    it('should update colorProfile to dark', async () => {
+      const response = await request(app)
+        .put('/auth/profile')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ colorProfile: 'dark' })
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.colorProfile).toBe('dark');
+
+      // Verify in database
+      const updatedUser = await User.findById(testUser._id);
+      expect(updatedUser?.colorProfile).toBe('dark');
+    });
+
+    it('should update colorProfile to terminal', async () => {
+      const response = await request(app)
+        .put('/auth/profile')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ colorProfile: 'terminal' })
+        .expect(200);
+
+      expect(response.body.data.colorProfile).toBe('terminal');
+    });
+
+    it('should update colorProfile to surprise', async () => {
+      const response = await request(app)
+        .put('/auth/profile')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ colorProfile: 'surprise' })
+        .expect(200);
+
+      expect(response.body.data.colorProfile).toBe('surprise');
+    });
+
+    it('should reject invalid colorProfile value', async () => {
+      const response = await request(app)
+        .put('/auth/profile')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({ colorProfile: 'invalid-color' })
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      expect(response.body.message).toContain('Invalid color profile');
+    });
+
+    it('should return 401 without auth token', async () => {
+      const response = await request(app)
+        .put('/auth/profile')
+        .send({ colorProfile: 'dark' })
+        .expect(401);
+
+      expect(response.body).toEqual({
+        success: false,
+        message: 'Not authorized, no token'
+      });
+    });
+  });
+
+  describe('Color Profile in Auth Responses', () => {
+    it('should include colorProfile in register response', async () => {
+      const userData = {
+        username: 'colorprofileuser',
+        email: 'colorprofile@example.com',
+        password: 'password123'
+      };
+
+      const response = await request(app)
+        .post('/auth/register')
+        .send(userData)
+        .expect(201);
+
+      expect(response.body.data.colorProfile).toBe('light');
+    });
+
+    it('should include colorProfile in login response', async () => {
+      const testUser = new User({
+        username: 'logincoloruser',
+        email: 'logincolor@example.com',
+        password: 'password123',
+        colorProfile: 'terminal'
+      });
+      await testUser.save();
+
+      const response = await request(app)
+        .post('/auth/login')
+        .send({ email: 'logincolor@example.com', password: 'password123' })
+        .expect(200);
+
+      expect(response.body.data.colorProfile).toBe('terminal');
+    });
+  });
+
   describe('Authentication Flow Integration', () => {
     it('should complete full registration, login, refresh, and logout flow', async () => {
       // Register user

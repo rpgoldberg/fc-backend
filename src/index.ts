@@ -27,9 +27,9 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Debug logging for all requests
+// Debug logging for all requests (JSON.stringify prevents log injection)
 app.use((req, res, next) => {
-  console.log('[REQUEST]', req.method, req.path, req.url, 'Host:', req.get('host'));
+  console.log('[REQUEST]', req.method, JSON.stringify(req.path), JSON.stringify(req.url), 'Host:', JSON.stringify(req.get('host')));
   next();
 });
 

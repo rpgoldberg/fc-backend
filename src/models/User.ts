@@ -1,12 +1,15 @@
 import mongoose, { Document, Schema } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
+export type ColorProfile = 'light' | 'dark' | 'terminal' | 'surprise';
+
 export interface IUser extends Document {
   _id: mongoose.Types.ObjectId;
   username: string;
   email: string;
   password: string;
   isAdmin: boolean;
+  colorProfile: ColorProfile;
   comparePassword(candidatePassword: string): Promise<boolean>;
   createdAt: Date;
   updatedAt: Date;
@@ -28,9 +31,14 @@ const UserSchema = new Schema<IUser>(
       type: String, 
       required: true 
     },
-    isAdmin: { 
-      type: Boolean, 
-      default: false 
+    isAdmin: {
+      type: Boolean,
+      default: false
+    },
+    colorProfile: {
+      type: String,
+      enum: ['light', 'dark', 'terminal', 'surprise'],
+      default: 'light'
     }
   },
   { timestamps: true }

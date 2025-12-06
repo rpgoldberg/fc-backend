@@ -222,6 +222,94 @@ describe('User Model', () => {
     });
   });
 
+  describe('Color Profile Preferences', () => {
+    it('should set colorProfile to light by default', async () => {
+      const userData = {
+        username: 'testuser',
+        email: 'test@example.com',
+        password: 'password123'
+      };
+
+      const user = new User(userData);
+      const savedUser = await user.save();
+
+      expect(savedUser.colorProfile).toBe('light');
+    });
+
+    it('should allow setting colorProfile to dark', async () => {
+      const userData = {
+        username: 'darkuser',
+        email: 'dark@example.com',
+        password: 'password123',
+        colorProfile: 'dark'
+      };
+
+      const user = new User(userData);
+      const savedUser = await user.save();
+
+      expect(savedUser.colorProfile).toBe('dark');
+    });
+
+    it('should allow setting colorProfile to terminal', async () => {
+      const userData = {
+        username: 'termuser',
+        email: 'term@example.com',
+        password: 'password123',
+        colorProfile: 'terminal'
+      };
+
+      const user = new User(userData);
+      const savedUser = await user.save();
+
+      expect(savedUser.colorProfile).toBe('terminal');
+    });
+
+    it('should allow setting colorProfile to surprise', async () => {
+      const userData = {
+        username: 'surpriseuser',
+        email: 'surprise@example.com',
+        password: 'password123',
+        colorProfile: 'surprise'
+      };
+
+      const user = new User(userData);
+      const savedUser = await user.save();
+
+      expect(savedUser.colorProfile).toBe('surprise');
+    });
+
+    it('should reject invalid colorProfile values', async () => {
+      const userData = {
+        username: 'invaliduser',
+        email: 'invalid@example.com',
+        password: 'password123',
+        colorProfile: 'invalid-profile'
+      };
+
+      const user = new User(userData);
+
+      await expect(user.save()).rejects.toThrow();
+    });
+
+    it('should allow updating colorProfile', async () => {
+      const userData = {
+        username: 'updateuser',
+        email: 'update@example.com',
+        password: 'password123'
+      };
+
+      const user = new User(userData);
+      const savedUser = await user.save();
+      expect(savedUser.colorProfile).toBe('light');
+
+      savedUser.colorProfile = 'dark';
+      await savedUser.save();
+
+      const updatedUser = await User.findById(savedUser._id);
+      expect(updatedUser?.colorProfile).toBe('dark');
+    });
+  });
+
   describe('Timestamps', () => {
     it('should automatically set createdAt and updatedAt', async () => {
       const userData = {

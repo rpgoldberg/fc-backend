@@ -244,12 +244,22 @@ export const scrapeMFCData = async (req: Request, res: Response) => {
       });
     }
 
-    // Check if it's an MFC URL
-    if (!mfcLink.includes('myfigurecollection.net')) {
-      logger.debug('URL is not from myfigurecollection.net');
+    // Check if it's an MFC URL - use strict hostname validation to prevent bypass attacks
+    try {
+      const parsedMfcUrl = new URL(mfcLink);
+      const hostname = parsedMfcUrl.hostname.toLowerCase();
+      if (hostname !== 'myfigurecollection.net' && hostname !== 'www.myfigurecollection.net') {
+        logger.debug('URL is not from myfigurecollection.net');
+        return res.status(400).json({
+          success: false,
+          message: 'URL must be from myfigurecollection.net'
+        });
+      }
+    } catch {
+      logger.debug('Invalid URL format for MFC link');
       return res.status(400).json({
         success: false,
-        message: 'URL must be from myfigurecollection.net'
+        message: 'Invalid URL format'
       });
     }
 
@@ -404,7 +414,8 @@ export const createFigure = async (req: Request, res: Response) => {
     if (mfcLink) {
       try {
         const parsedUrl = new URL(mfcLink);
-        if (!parsedUrl.hostname.includes('myfigurecollection.net')) {
+        const hostname = parsedUrl.hostname.toLowerCase();
+        if (hostname !== 'myfigurecollection.net' && hostname !== 'www.myfigurecollection.net') {
           validationErrors.push('Invalid MFC link domain');
         }
       } catch {
