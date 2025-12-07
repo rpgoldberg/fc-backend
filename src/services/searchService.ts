@@ -27,7 +27,9 @@ export const wordWheelSearch = async (
   const escapedQuery = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   // Check if we should use Atlas Search or fallback
-  const useAtlasSearch = process.env.NODE_ENV === 'production' &&
+  // Uses explicit ENABLE_ATLAS_SEARCH flag to support multiple Atlas-connected environments
+  // (dev, test, production) rather than relying on NODE_ENV which only covers production
+  const useAtlasSearch = process.env.ENABLE_ATLAS_SEARCH === 'true' &&
                         process.env.TEST_MODE !== 'memory' &&
                         !process.env.INTEGRATION_TEST;
 
@@ -128,7 +130,9 @@ export const partialSearch = async (
   const escapedQuery = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
   // Check if we should use Atlas Search or fallback
-  const useAtlasSearch = process.env.NODE_ENV === 'production' &&
+  // Uses explicit ENABLE_ATLAS_SEARCH flag to support multiple Atlas-connected environments
+  // (dev, test, production) rather than relying on NODE_ENV which only covers production
+  const useAtlasSearch = process.env.ENABLE_ATLAS_SEARCH === 'true' &&
                         process.env.TEST_MODE !== 'memory' &&
                         !process.env.INTEGRATION_TEST;
 
