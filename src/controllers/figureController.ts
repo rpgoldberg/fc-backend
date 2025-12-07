@@ -310,7 +310,20 @@ export const getFigures = async (req: Request, res: Response) => {
     if (limitParam && (isNaN(limit) || limit <= 0 || limit > 100)) {
       validationErrors.push('Limit must be between 1 and 100');
     }
-    
+
+    // Validate sortBy parameter
+    const sortByParam = req.query.sortBy as string;
+    const validSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
+    if (sortByParam && !validSortFields.includes(sortByParam)) {
+      validationErrors.push(`sortBy must be one of: ${validSortFields.join(', ')}`);
+    }
+
+    // Validate sortOrder parameter
+    const sortOrderParam = req.query.sortOrder as string;
+    if (sortOrderParam && !['asc', 'desc'].includes(sortOrderParam)) {
+      validationErrors.push('sortOrder must be either asc or desc');
+    }
+
     // Return validation errors if any
     if (validationErrors.length > 0) {
       return res.status(422).json({
@@ -323,6 +336,8 @@ export const getFigures = async (req: Request, res: Response) => {
     // Use default values if not specified
     const validPage = page || 1;
     const validLimit = limit || 10;
+    const validSortBy = sortByParam || 'createdAt';
+    const validSortOrder = sortOrderParam === 'asc' ? 1 : -1;
     const skip = (validPage - 1) * validLimit;
 
     const total = await Figure.countDocuments({ userId });
@@ -337,8 +352,11 @@ export const getFigures = async (req: Request, res: Response) => {
       });
     }
 
+    // Build dynamic sort object
+    const sortOptions: Record<string, 1 | -1> = { [validSortBy]: validSortOrder };
+
     const figures = await Figure.find({ userId })
-      .sort({ createdAt: -1 })
+      .sort(sortOptions)
       .skip(skip)
       .limit(validLimit);
 
@@ -773,11 +791,34 @@ export const filterFigures = async (req: Request, res: Response) => {
         errors: ['Limit must be between 1 and 100']
       });
     }
-    
+
+    // Validate sortBy parameter
+    const sortByParam = req.query.sortBy as string;
+    const validSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
+    if (sortByParam && !validSortFields.includes(sortByParam)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sort validation failed',
+        errors: [`sortBy must be one of: ${validSortFields.join(', ')}`]
+      });
+    }
+
+    // Validate sortOrder parameter
+    const sortOrderParam = req.query.sortOrder as string;
+    if (sortOrderParam && !['asc', 'desc'].includes(sortOrderParam)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sort validation failed',
+        errors: ['sortOrder must be either asc or desc']
+      });
+    }
+
     const validPage = page || 1;
     const validLimit = limit || 10;
+    const validSortBy = sortByParam || 'createdAt';
+    const validSortOrder = sortOrderParam === 'asc' ? 1 : -1;
     const skip = (validPage - 1) * validLimit;
-    
+
     const total = await Figure.countDocuments(query);
     const pages = Math.ceil(total / validLimit);
 
@@ -789,9 +830,12 @@ export const filterFigures = async (req: Request, res: Response) => {
         errors: [`Requested page ${validPage} is beyond the total of ${pages} pages`]
       });
     }
-    
+
+    // Build dynamic sort object
+    const sortOptions: Record<string, 1 | -1> = { [validSortBy]: validSortOrder };
+
     const figures = await Figure.find(query)
-      .sort({ createdAt: -1 })
+      .sort(sortOptions)
       .skip(skip)
       .limit(validLimit);
     
