@@ -38,10 +38,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Connect to MongoDB
-connectDB();
-
-
 // Routes
 app.use('/auth', authRoutes);
 app.use('/figures', figureRoutes);
@@ -50,12 +46,20 @@ app.use('/users', userRoutes);
 app.use('/admin', adminRoutes);
 app.use('/', publicConfigRouter);
 
-// Health check endpoint
+// Health check endpoint - validates MongoDB connection
 app.get('/health', (req, res) => {
-  res.status(200).json({
+  // mongoose.connection.readyState: 0=disconnected, 1=connected, 2=connecting, 3=disconnecting
+  const mongoState = mongoose.connection.readyState;
+  const isMongoHealthy = mongoState === 1;
+
+  const status = isMongoHealthy ? 'healthy' : 'unhealthy';
+  const httpStatus = isMongoHealthy ? 200 : 503;
+
+  res.status(httpStatus).json({
     service: 'backend',
     version: packageJson.version,
-    status: 'healthy'
+    status,
+    mongodb: isMongoHealthy ? 'connected' : 'disconnected'
   });
 });
 
@@ -119,7 +123,49 @@ app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
 
-// Start the server
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Graceful shutdown handling
+let server: ReturnType<typeof app.listen>;
+
+const gracefulShutdown = async (signal: string) => {
+  logger.info(`Received ${signal}. Starting graceful shutdown...`);
+
+  // Stop accepting new connections
+  if (server) {
+    server.close(() => {
+      logger.info('HTTP server closed');
+    });
+  }
+
+  // Close MongoDB connection
+  try {
+    await mongoose.connection.close();
+    logger.info('MongoDB connection closed');
+  } catch (err) {
+    logger.error('Error closing MongoDB connection:', err);
+  }
+
+  // Exit process
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Start the server - connect to MongoDB first
+const startServer = async () => {
+  try {
+    // Connect to MongoDB before accepting requests
+    await connectDB();
+    logger.info('MongoDB connected successfully');
+
+    // Now start the HTTP server
+    server = app.listen(PORT, () => {
+      logger.info(`Server running on port ${PORT}`);
+    });
+  } catch (err) {
+    logger.error('Failed to start server:', err);
+    process.exit(1);
+  }
+};
+
+startServer();
