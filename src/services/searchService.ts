@@ -77,7 +77,8 @@ export const wordWheelSearch = async (
               {
                 equals: {
                   value: searchQuery,
-                  path: 'scale'
+                  path: 'scale',
+                  score: { boost: { value: 2 } }
                 }
               }
             ],
@@ -205,7 +206,8 @@ export const partialSearch = async (
               {
                 equals: {
                   value: searchQuery,
-                  path: 'scale'
+                  path: 'scale',
+                  score: { boost: { value: 2 } }
                 }
               }
             ]
@@ -337,7 +339,8 @@ export const figureSearch = async (
               {
                 equals: {
                   value: searchQuery,
-                  path: 'scale'
+                  path: 'scale',
+                  score: { boost: { value: 2 } }
                 }
               }
             ],
