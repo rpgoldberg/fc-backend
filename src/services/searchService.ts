@@ -114,7 +114,8 @@ export const wordWheelSearch = async (
           imageUrl: 1,
           userId: 1,
           createdAt: 1,
-          updatedAt: 1
+          updatedAt: 1,
+          searchScore: 1
         }
       }
     ]);
@@ -245,7 +246,8 @@ export const partialSearch = async (
           imageUrl: 1,
           userId: 1,
           createdAt: 1,
-          updatedAt: 1
+          updatedAt: 1,
+          searchScore: 1
         }
       }
     ]);
@@ -373,7 +375,8 @@ export const figureSearch = async (
           imageUrl: 1,
           userId: 1,
           createdAt: 1,
-          updatedAt: 1
+          updatedAt: 1,
+          searchScore: 1
         }
       }
     ]);
