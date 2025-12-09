@@ -75,8 +75,8 @@ export const wordWheelSearch = async (
                 }
               },
               {
-                text: {
-                  query: searchQuery,
+                equals: {
+                  value: searchQuery,
                   path: 'scale'
                 }
               }
@@ -203,8 +203,8 @@ export const partialSearch = async (
                 }
               },
               {
-                text: {
-                  query: searchQuery,
+                equals: {
+                  value: searchQuery,
                   path: 'scale'
                 }
               }
@@ -335,8 +335,8 @@ export const figureSearch = async (
                 }
               },
               {
-                text: {
-                  query: searchQuery,
+                equals: {
+                  value: searchQuery,
                   path: 'scale'
                 }
               }

@@ -31,8 +31,7 @@
         }
       ],
       "scale": {
-        "type": "string",
-        "analyzer": "lucene.keyword"
+        "type": "token"
       },
       "userId": {
         "type": "objectId"
