@@ -1,7 +1,105 @@
 import mongoose from 'mongoose';
 import Figure from '../../src/models/Figure';
 import User from '../../src/models/User';
-import { wordWheelSearch, partialSearch, figureSearch } from '../../src/services/searchService';
+import { wordWheelSearch, partialSearch, figureSearch, computeRegexScore } from '../../src/services/searchService';
+
+describe('Search Service - computeRegexScore', () => {
+  it('should return 0 for empty query', () => {
+    const doc = { name: 'Hatsune Miku', manufacturer: 'Good Smile Company', scale: '1/8' };
+    expect(computeRegexScore(doc, '')).toBe(0);
+    expect(computeRegexScore(doc, '   ')).toBe(0);
+  });
+
+  it('should give 2.0 points for exact scale match', () => {
+    const doc = { name: 'Test Figure', manufacturer: 'Test', scale: '1/8' };
+    expect(computeRegexScore(doc, '1/8')).toBe(2.0);
+  });
+
+  it('should give 1.5 points for name starting with query', () => {
+    const doc = { name: 'Hatsune Miku', manufacturer: 'GSC', scale: '1/8' };
+    expect(computeRegexScore(doc, 'hatsune')).toBe(1.5);
+  });
+
+  it('should give 1.5 points for name word boundary match', () => {
+    const doc = { name: 'Hatsune Miku', manufacturer: 'GSC', scale: '1/8' };
+    expect(computeRegexScore(doc, 'miku')).toBe(1.5);
+  });
+
+  it('should give 1.0 points for name partial match (not at word boundary)', () => {
+    const doc = { name: 'Mikasa Ackerman', manufacturer: 'Alter', scale: '1/7' };
+    expect(computeRegexScore(doc, 'kasa')).toBe(1.0);
+  });
+
+  it('should give 1.25 points for manufacturer starting with query', () => {
+    const doc = { name: 'Test', manufacturer: 'Good Smile Company', scale: '1/8' };
+    expect(computeRegexScore(doc, 'good')).toBe(1.25);
+  });
+
+  it('should give 1.25 points for manufacturer word boundary match', () => {
+    const doc = { name: 'Test', manufacturer: 'Good Smile Company', scale: '1/8' };
+    expect(computeRegexScore(doc, 'smile')).toBe(1.25);
+  });
+
+  it('should give 0.75 points for manufacturer partial match', () => {
+    const doc = { name: 'Test', manufacturer: 'Kotobukiya', scale: '1/8' };
+    expect(computeRegexScore(doc, 'buki')).toBe(0.75);
+  });
+
+  it('should give 0.5 points for location match', () => {
+    const doc = { name: 'Test', manufacturer: 'GSC', scale: '1/8', location: 'Shelf A' };
+    expect(computeRegexScore(doc, 'shelf')).toBe(0.5);
+  });
+
+  it('should give 0.5 points for boxNumber match', () => {
+    const doc = { name: 'Test', manufacturer: 'GSC', scale: '1/8', boxNumber: 'Box 001' };
+    expect(computeRegexScore(doc, 'box')).toBe(0.5);
+  });
+
+  it('should accumulate scores across multiple fields', () => {
+    const doc = {
+      name: 'Miku Figure',
+      manufacturer: 'Good Smile Company',
+      scale: '1/8',
+      location: 'Miku Shelf'
+    };
+    // Query 'miku' matches: name word boundary (1.5) + location partial (0.5) = 2.0
+    expect(computeRegexScore(doc, 'miku')).toBe(2.0);
+  });
+
+  it('should accumulate scores for multi-word queries', () => {
+    const doc = { name: 'Hatsune Miku', manufacturer: 'Good Smile Company', scale: '1/8' };
+    // 'hatsune' = name start (1.5), 'miku' = name word boundary (1.5)
+    expect(computeRegexScore(doc, 'hatsune miku')).toBe(3.0);
+  });
+
+  it('should combine scale boost with other matches', () => {
+    const doc = { name: 'Miku 1/8 Scale', manufacturer: 'GSC', scale: '1/8' };
+    // '1/8' = exact scale (2.0) + name word boundary (1.5) = 3.5
+    expect(computeRegexScore(doc, '1/8')).toBe(3.5);
+  });
+
+  it('should handle missing fields gracefully', () => {
+    const doc = { name: 'Test' };
+    expect(computeRegexScore(doc, 'test')).toBe(1.5);
+  });
+
+  it('should handle null/undefined fields gracefully', () => {
+    const doc = { name: null, manufacturer: undefined, scale: '1/8' };
+    expect(computeRegexScore(doc, '1/8')).toBe(2.0);
+  });
+
+  it('should be case insensitive', () => {
+    const doc = { name: 'Hatsune Miku', manufacturer: 'Good Smile Company', scale: '1/8' };
+    expect(computeRegexScore(doc, 'MIKU')).toBe(computeRegexScore(doc, 'miku'));
+    expect(computeRegexScore(doc, 'MiKu')).toBe(computeRegexScore(doc, 'miku'));
+  });
+
+  it('should round to 2 decimal places', () => {
+    const doc = { name: 'Test', manufacturer: 'Test', scale: '1/8', location: 'Test', boxNumber: 'Test' };
+    const score = computeRegexScore(doc, 'test');
+    expect(score.toString()).toMatch(/^\d+(\.\d{1,2})?$/);
+  });
+});
 
 describe('Search Service - Word Wheel Search', () => {
   let testUser: any;

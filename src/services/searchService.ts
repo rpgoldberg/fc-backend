@@ -1,5 +1,8 @@
 import mongoose from 'mongoose';
 import Figure, { IFigure } from '../models/Figure';
+import { createLogger } from '../utils/logger';
+
+const logger = createLogger('SEARCH');
 
 export interface SearchOptions {
   limit?: number;
@@ -18,7 +21,7 @@ export interface SearchOptions {
  * - Manufacturer contains query (not at start): 0.75
  * - Location/boxNumber contains: 0.5
  */
-const computeRegexScore = (doc: any, query: string): number => {
+export const computeRegexScore = (doc: any, query: string): number => {
   const q = query.toLowerCase();
   const terms = q.split(/\s+/).filter(t => t.length > 0);
   let score = 0;
@@ -181,7 +184,7 @@ export const wordWheelSearch = async (
 
     return results as IFigure[];
   } catch (error) {
-    console.error('[SEARCH] Atlas Search error, falling back to regex:', error);
+    logger.error('Atlas Search error, falling back to regex:', error instanceof Error ? error.message : 'Unknown error');
     // Fallback to regex if Atlas Search fails
     const fetchLimit = Math.min(limit * 3, 50);
     const results = await Figure.find({
@@ -327,7 +330,7 @@ export const partialSearch = async (
 
     return results as IFigure[];
   } catch (error) {
-    console.error('[SEARCH] Atlas Search error, falling back to regex:', error);
+    logger.error('Atlas Search error, falling back to regex:', error instanceof Error ? error.message : 'Unknown error');
     // Fallback to regex if Atlas Search fails
     const fetchLimit = Math.min((offset + limit) * 2, 100);
     const results = await Figure.find({
@@ -472,7 +475,7 @@ export const figureSearch = async (
 
     return results as IFigure[];
   } catch (error) {
-    console.error('[SEARCH] Atlas Search error, falling back to regex:', error);
+    logger.error('Atlas Search error, falling back to regex:', error instanceof Error ? error.message : 'Unknown error');
     // Fallback to regex if Atlas Search fails
     const searchTerms = searchQuery.split(' ').filter(term => term.trim().length > 0);
     const regexConditions = searchTerms.map(term => ({
