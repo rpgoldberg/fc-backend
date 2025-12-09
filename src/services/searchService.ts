@@ -84,6 +84,14 @@ export const wordWheelSearch = async (
         }
       },
       {
+        $addFields: {
+          searchScore: { $meta: 'searchScore' }
+        }
+      },
+      {
+        $sort: { searchScore: -1 }
+      },
+      {
         $limit: limit
       },
       {
@@ -193,6 +201,14 @@ export const partialSearch = async (
         $match: {
           userId
         }
+      },
+      {
+        $addFields: {
+          searchScore: { $meta: 'searchScore' }
+        }
+      },
+      {
+        $sort: { searchScore: -1 }
       },
       {
         $skip: offset
@@ -310,6 +326,14 @@ export const figureSearch = async (
         $match: {
           userId
         }
+      },
+      {
+        $addFields: {
+          searchScore: { $meta: 'searchScore' }
+        }
+      },
+      {
+        $sort: { searchScore: -1 }
       },
       {
         $project: {
