@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { createLogger } from '../utils/logger';
+import { figureSearch } from '../services/searchService';
 
 // Create secure logger instance for this controller
 const logger = createLogger('FIGURE');
@@ -672,7 +673,7 @@ export const deleteFigure = async (req: Request, res: Response) => {
   }
 };
 
-// Search figures using MongoDB Atlas Search
+// Search figures using MongoDB Atlas Search (delegated to searchService)
 export const searchFigures = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -683,7 +684,7 @@ export const searchFigures = async (req: Request, res: Response) => {
     }
     const userId = req.user.id;
     const { query } = req.query;
-    
+
     if (!query) {
       return res.status(400).json({
         success: false,
@@ -702,83 +703,10 @@ export const searchFigures = async (req: Request, res: Response) => {
         message: 'Invalid user identifier'
       });
     }
-    
-    // Use different search logic based on environment
-    let searchResults;
-    
-    // Enhanced check: Use fallback for test environments OR when Atlas Search is unavailable
-    const useAtlasSearch = process.env.NODE_ENV === 'production' && 
-                          process.env.TEST_MODE !== 'memory' &&
-                          !process.env.INTEGRATION_TEST;
-    
-    if (!useAtlasSearch) {
-      // Fallback search for test environment that simulates Atlas Search behavior
-      logger.debug('Using fallback search (regex) for non-Atlas environment');
-      const searchTerms = (query as string).split(' ').filter(term => term.trim().length > 0);
-      
-      // Create regex patterns for each search term
-      const regexConditions = searchTerms.map(term => ({
-        $or: [
-          { manufacturer: { $regex: term, $options: 'i' } },
-          { name: { $regex: term, $options: 'i' } },
-          { location: { $regex: term, $options: 'i' } },
-          { boxNumber: { $regex: term, $options: 'i' } }
-        ]
-      }));
-      
-      // lgtm[js/sql-injection] - Mongoose ODM handles parameterization, regex search is intentional feature
-      searchResults = await Figure.find({
-        userId: userObjectId,
-        $and: regexConditions // All search terms must be found (simulates Atlas Search behavior)
-      });
-    } else {
-      // MongoDB Atlas Search query for production
-      logger.debug('Using Atlas Search for production environment');
-      // lgtm[js/sql-injection] - MongoDB Atlas Search with parameterized query, not vulnerable to injection
-      searchResults = await Figure.aggregate([
-        {
-          $search: {
-            index: 'figures',
-            compound: {
-              must: [
-                {
-                  text: {
-                    query: query as string,
-                    path: ['manufacturer', 'name', 'location', 'boxNumber'],
-                    fuzzy: {
-                      maxEdits: 1,
-                      prefixLength: 2
-                    }
-                  }
-                }
-              ],
-              filter: [
-                {
-                  equals: {
-                    path: 'userId',
-                    value: userObjectId
-                  }
-                }
-              ]
-            }
-          }
-        },
-        {
-          $project: {
-            _id: 1,
-            manufacturer: 1,
-            name: 1,
-            scale: 1,
-            mfcLink: 1,
-            location: 1,
-            boxNumber: 1,
-            imageUrl: 1,
-            userId: 1
-          }
-        }
-      ]);
-    }
-    
+
+    // Delegate to search service (handles Atlas Search vs regex fallback)
+    const searchResults = await figureSearch(query as string, userObjectId);
+
     // Transform to match expected API format
     const hits = searchResults.map(doc => ({
       id: doc._id,
@@ -789,9 +717,10 @@ export const searchFigures = async (req: Request, res: Response) => {
       location: doc.location,
       boxNumber: doc.boxNumber,
       imageUrl: doc.imageUrl,
-      userId: doc.userId
+      userId: doc.userId,
+      searchScore: (doc as any).searchScore
     }));
-    
+
     return res.status(200).json({
       success: true,
       count: hits.length,

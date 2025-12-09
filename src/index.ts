@@ -5,7 +5,8 @@ import dotenv from 'dotenv';
 import figureRoutes from './routes/figureRoutes';
 import userRoutes from './routes/userRoutes';
 import authRoutes from './routes/authRoutes';
-import searchRoutes from './routes/searchRoutes';
+// Note: /api/search routes removed - frontend uses /figures/search
+// import searchRoutes from './routes/searchRoutes';
 import adminRoutes, { publicConfigRouter } from './routes/adminRoutes';
 import { connectDB } from './config/db';
 import { globalErrorHandler } from './middleware/validationMiddleware';
@@ -41,7 +42,7 @@ app.use((req, res, next) => {
 app.use('/auth', authRoutes);
 app.use('/figures', figureRoutes);
 app.use('/users', userRoutes);
-app.use('/api/search', searchRoutes);
+// app.use('/api/search', searchRoutes); // Removed - frontend uses /figures/search
 app.use('/admin', adminRoutes);
 app.use('/', publicConfigRouter);
 

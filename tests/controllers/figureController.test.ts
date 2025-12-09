@@ -3,7 +3,14 @@ import mongoose from 'mongoose';
 import * as figureController from '../../src/controllers/figureController';
 import Figure from '../../src/models/Figure';
 import axios from 'axios';
+import * as searchService from '../../src/services/searchService';
 import '../setup'; // Import test setup for environment variables
+
+// Mock the search service
+jest.mock('../../src/services/searchService', () => ({
+  figureSearch: jest.fn()
+}));
+const mockedSearchService = jest.mocked(searchService);
 
 // Comprehensive mocking for Figure model and external dependencies
 jest.mock('../../src/models/Figure', () => {
@@ -535,8 +542,8 @@ describe('FigureController', () => {
     it('should handle database errors during search', async () => {
       mockRequest.query = { query: 'Miku' };
 
-      // Simulate a database error (test mode uses find, not aggregate)
-      MockedFigure.find = jest.fn().mockRejectedValue(new Error('Database connection failed'));
+      // Simulate a database error from the search service
+      mockedSearchService.figureSearch.mockRejectedValue(new Error('Database connection failed'));
 
       await figureController.searchFigures(mockRequest as Request, mockResponse as Response);
 
@@ -563,8 +570,8 @@ describe('FigureController', () => {
     it('should handle search with very long query', async () => {
       mockRequest.query = { query: 'A'.repeat(300) };
 
-      // Mock successful search (no results for long nonsense query)
-      MockedFigure.find = jest.fn().mockResolvedValue([]);
+      // Mock successful search via service (no results for long nonsense query)
+      mockedSearchService.figureSearch.mockResolvedValue([]);
 
       await figureController.searchFigures(mockRequest as Request, mockResponse as Response);
 
@@ -575,13 +582,8 @@ describe('FigureController', () => {
         data: []
       });
     });
-    it('should search figures using MongoDB Atlas Search with comprehensive mocking', async () => {
-      // Temporarily override test mode to force Atlas Search path
-      const originalNodeEnv = process.env.NODE_ENV;
-      const originalTestMode = process.env.TEST_MODE;
-      process.env.NODE_ENV = 'production';
-      process.env.TEST_MODE = 'atlas';
-      
+
+    it('should search figures via search service and return results', async () => {
       mockRequest.query = { query: 'Miku' };
 
       const userId = '000000000000000000000123';
@@ -595,54 +597,21 @@ describe('FigureController', () => {
           location: 'Shelf A',
           boxNumber: 'Box 1',
           imageUrl: 'https://example.com/image.jpg',
-          userId: new mongoose.Types.ObjectId(userId)
+          userId: new mongoose.Types.ObjectId(userId),
+          searchScore: 2.5 // Atlas Search score (undefined for regex fallback)
         }
       ];
 
-      // Enhanced Atlas Search aggregation mocking with more robust pipeline simulation
-      MockedFigure.aggregate = jest.fn().mockImplementation((pipeline) => {
-        // Validate the search pipeline structure
-        expect(pipeline[0].$search).toBeDefined();
-        expect(pipeline[0].$search.compound).toBeDefined();
-
-        // Simulate Atlas Search ranking and filtering
-        const searchQuery = pipeline[0].$search.compound.must[0].text.query;
-        const filteredResults = mockSearchResults.filter(figure => 
-          figure.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          figure.manufacturer.toLowerCase().includes(searchQuery.toLowerCase())
-        );
-
-        return Promise.resolve(filteredResults);
-      });
+      // Mock the search service
+      mockedSearchService.figureSearch.mockResolvedValue(mockSearchResults as any);
 
       await figureController.searchFigures(mockRequest as Request, mockResponse as Response);
 
-      expect(MockedFigure.aggregate).toHaveBeenCalledWith([
-        {
-          $search: {
-            index: 'figures',
-            compound: {
-              must: [{
-                text: {
-                  query: 'Miku',
-                  path: ['manufacturer', 'name', 'location', 'boxNumber'],
-                  fuzzy: {
-                    maxEdits: 1,
-                    prefixLength: 2
-                  }
-                }
-              }],
-              filter: [{
-                equals: {
-                  path: 'userId',
-                  value: expect.any(mongoose.Types.ObjectId)
-                }
-              }]
-            }
-          }
-        },
-        expect.any(Object)
-      ]);
+      // Verify the service was called with correct parameters
+      expect(mockedSearchService.figureSearch).toHaveBeenCalledWith(
+        'Miku',
+        expect.any(mongoose.Types.ObjectId)
+      );
 
       expect(mockResponse.status).toHaveBeenCalledWith(200);
       expect(mockResponse.json).toHaveBeenCalledWith(
@@ -652,7 +621,7 @@ describe('FigureController', () => {
           data: expect.any(Array)
         })
       );
-      
+
       // Check the actual response data separately for better debugging
       const responseCall = (mockResponse.json as jest.Mock).mock.calls[0][0];
       expect(responseCall.data).toHaveLength(1);
@@ -665,12 +634,9 @@ describe('FigureController', () => {
         location: 'Shelf A',
         boxNumber: 'Box 1',
         imageUrl: 'https://example.com/image.jpg',
-        userId: expect.any(mongoose.Types.ObjectId)
+        userId: expect.any(mongoose.Types.ObjectId),
+        searchScore: 2.5 // Verify searchScore is passed through from service
       });
-      
-      // Restore original environment
-      process.env.NODE_ENV = originalNodeEnv;
-      process.env.TEST_MODE = originalTestMode;
     });
 
     it('should return error if query parameter is missing', async () => {
