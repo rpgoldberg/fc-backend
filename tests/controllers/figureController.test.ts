@@ -597,7 +597,8 @@ describe('FigureController', () => {
           location: 'Shelf A',
           boxNumber: 'Box 1',
           imageUrl: 'https://example.com/image.jpg',
-          userId: new mongoose.Types.ObjectId(userId)
+          userId: new mongoose.Types.ObjectId(userId),
+          searchScore: 2.5 // Atlas Search score (undefined for regex fallback)
         }
       ];
 
@@ -633,7 +634,8 @@ describe('FigureController', () => {
         location: 'Shelf A',
         boxNumber: 'Box 1',
         imageUrl: 'https://example.com/image.jpg',
-        userId: expect.any(mongoose.Types.ObjectId)
+        userId: expect.any(mongoose.Types.ObjectId),
+        searchScore: 2.5 // Verify searchScore is passed through from service
       });
     });
 

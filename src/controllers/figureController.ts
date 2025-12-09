@@ -717,7 +717,8 @@ export const searchFigures = async (req: Request, res: Response) => {
       location: doc.location,
       boxNumber: doc.boxNumber,
       imageUrl: doc.imageUrl,
-      userId: doc.userId
+      userId: doc.userId,
+      searchScore: (doc as any).searchScore
     }));
 
     return res.status(200).json({

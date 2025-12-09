@@ -7,6 +7,57 @@ export interface SearchOptions {
 }
 
 /**
+ * Compute a relevance score for regex fallback matches.
+ * Mimics Atlas Search scoring behavior for consistent UX.
+ *
+ * Scoring weights:
+ * - Exact scale match: 2.0 (matches Atlas boost)
+ * - Name starts with query: 1.5
+ * - Manufacturer starts with query: 1.25
+ * - Name contains query (not at start): 1.0
+ * - Manufacturer contains query (not at start): 0.75
+ * - Location/boxNumber contains: 0.5
+ */
+const computeRegexScore = (doc: any, query: string): number => {
+  const q = query.toLowerCase();
+  const terms = q.split(/\s+/).filter(t => t.length > 0);
+  let score = 0;
+
+  for (const term of terms) {
+    const name = (doc.name || '').toLowerCase();
+    const manufacturer = (doc.manufacturer || '').toLowerCase();
+    const scale = (doc.scale || '').toLowerCase();
+    const location = (doc.location || '').toLowerCase();
+    const boxNumber = (doc.boxNumber || '').toLowerCase();
+
+    // Exact scale match (highest priority, like Atlas boost)
+    if (scale === term) {
+      score += 2.0;
+    }
+
+    // Name scoring
+    if (name.startsWith(term) || name.includes(` ${term}`)) {
+      score += 1.5; // Word boundary match
+    } else if (name.includes(term)) {
+      score += 1.0; // Partial match
+    }
+
+    // Manufacturer scoring
+    if (manufacturer.startsWith(term) || manufacturer.includes(` ${term}`)) {
+      score += 1.25;
+    } else if (manufacturer.includes(term)) {
+      score += 0.75;
+    }
+
+    // Location/boxNumber (lower weight)
+    if (location.includes(term)) score += 0.5;
+    if (boxNumber.includes(term)) score += 0.5;
+  }
+
+  return Math.round(score * 100) / 100; // Round to 2 decimal places
+};
+
+/**
  * Word Wheel Search - Autocomplete suggestions as user types
  * Minimum 3 characters required (matches Atlas Search minGrams: 3)
  * Uses Atlas Search autocomplete analyzer or regex fallback
@@ -33,6 +84,8 @@ export const wordWheelSearch = async (
 
   if (!useAtlasSearch) {
     // Fallback: Use regex for autocomplete-style matching (word boundary or start of string)
+    // Fetch more than limit to allow for re-ranking, but cap for performance
+    const fetchLimit = Math.min(limit * 3, 50);
     const results = await Figure.find({
       userId,
       $or: [
@@ -41,11 +94,17 @@ export const wordWheelSearch = async (
         { scale: { $regex: `^${escapedQuery}$`, $options: 'i' } }
       ]
     })
-      .limit(limit)
-      .sort({ name: 1 })
+      .limit(fetchLimit)
       .lean();
 
-    return results as unknown as IFigure[];
+    // Add computed scores and sort by relevance
+    const scoredResults = results.map(doc => ({
+      ...doc,
+      searchScore: computeRegexScore(doc, searchQuery)
+    }));
+    scoredResults.sort((a, b) => b.searchScore - a.searchScore);
+
+    return scoredResults.slice(0, limit) as unknown as IFigure[];
   }
 
   // Atlas Search compound autocomplete query (searches name, manufacturer, and scale)
@@ -124,6 +183,7 @@ export const wordWheelSearch = async (
   } catch (error) {
     console.error('[SEARCH] Atlas Search error, falling back to regex:', error);
     // Fallback to regex if Atlas Search fails
+    const fetchLimit = Math.min(limit * 3, 50);
     const results = await Figure.find({
       userId,
       $or: [
@@ -132,11 +192,17 @@ export const wordWheelSearch = async (
         { scale: { $regex: `^${escapedQuery}$`, $options: 'i' } }
       ]
     })
-      .limit(limit)
-      .sort({ name: 1 })
+      .limit(fetchLimit)
       .lean();
 
-    return results as unknown as IFigure[];
+    // Add computed scores and sort by relevance
+    const scoredResults = results.map(doc => ({
+      ...doc,
+      searchScore: computeRegexScore(doc, searchQuery)
+    }));
+    scoredResults.sort((a, b) => b.searchScore - a.searchScore);
+
+    return scoredResults.slice(0, limit) as unknown as IFigure[];
   }
 };
 
@@ -168,6 +234,8 @@ export const partialSearch = async (
 
   if (!useAtlasSearch) {
     // Fallback: Use regex for partial matching (anywhere in string)
+    // Fetch more than needed to allow for re-ranking, but cap for performance
+    const fetchLimit = Math.min((offset + limit) * 2, 100);
     const results = await Figure.find({
       userId,
       $or: [
@@ -176,12 +244,17 @@ export const partialSearch = async (
         { scale: { $regex: `^${escapedQuery}$`, $options: 'i' } }
       ]
     })
-      .skip(offset)
-      .limit(limit)
-      .sort({ name: 1 })
+      .limit(fetchLimit)
       .lean();
 
-    return results as unknown as IFigure[];
+    // Add computed scores and sort by relevance
+    const scoredResults = results.map(doc => ({
+      ...doc,
+      searchScore: computeRegexScore(doc, searchQuery)
+    }));
+    scoredResults.sort((a, b) => b.searchScore - a.searchScore);
+
+    return scoredResults.slice(offset, offset + limit) as unknown as IFigure[];
   }
 
   // Atlas Search text query for partial matching (name, manufacturer, scale)
@@ -256,6 +329,7 @@ export const partialSearch = async (
   } catch (error) {
     console.error('[SEARCH] Atlas Search error, falling back to regex:', error);
     // Fallback to regex if Atlas Search fails
+    const fetchLimit = Math.min((offset + limit) * 2, 100);
     const results = await Figure.find({
       userId,
       $or: [
@@ -264,12 +338,17 @@ export const partialSearch = async (
         { scale: { $regex: `^${escapedQuery}$`, $options: 'i' } }
       ]
     })
-      .skip(offset)
-      .limit(limit)
-      .sort({ name: 1 })
+      .limit(fetchLimit)
       .lean();
 
-    return results as unknown as IFigure[];
+    // Add computed scores and sort by relevance
+    const scoredResults = results.map(doc => ({
+      ...doc,
+      searchScore: computeRegexScore(doc, searchQuery)
+    }));
+    scoredResults.sort((a, b) => b.searchScore - a.searchScore);
+
+    return scoredResults.slice(offset, offset + limit) as unknown as IFigure[];
   }
 };
 
@@ -308,12 +387,22 @@ export const figureSearch = async (
       ]
     }));
 
+    // Fetch with performance cap
     const results = await Figure.find({
       userId,
       $and: regexConditions
-    }).lean();
+    })
+      .limit(100)
+      .lean();
 
-    return results as unknown as IFigure[];
+    // Add computed scores and sort by relevance
+    const scoredResults = results.map(doc => ({
+      ...doc,
+      searchScore: computeRegexScore(doc, searchQuery)
+    }));
+    scoredResults.sort((a, b) => b.searchScore - a.searchScore);
+
+    return scoredResults as unknown as IFigure[];
   }
 
   // Atlas Search with autocomplete for name, manufacturer, and scale
@@ -396,11 +485,21 @@ export const figureSearch = async (
       ]
     }));
 
+    // Fetch with performance cap
     const results = await Figure.find({
       userId,
       $and: regexConditions
-    }).lean();
+    })
+      .limit(100)
+      .lean();
 
-    return results as unknown as IFigure[];
+    // Add computed scores and sort by relevance
+    const scoredResults = results.map(doc => ({
+      ...doc,
+      searchScore: computeRegexScore(doc, searchQuery)
+    }));
+    scoredResults.sort((a, b) => b.searchScore - a.searchScore);
+
+    return scoredResults as unknown as IFigure[];
   }
 };
