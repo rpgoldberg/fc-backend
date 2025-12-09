@@ -37,7 +37,8 @@ export const wordWheelSearch = async (
       userId,
       $or: [
         { name: { $regex: `(^|\\s)${escapedQuery}`, $options: 'i' } },
-        { manufacturer: { $regex: `(^|\\s)${escapedQuery}`, $options: 'i' } }
+        { manufacturer: { $regex: `(^|\\s)${escapedQuery}`, $options: 'i' } },
+        { scale: { $regex: `^${escapedQuery}$`, $options: 'i' } }
       ]
     })
       .limit(limit)
@@ -47,7 +48,7 @@ export const wordWheelSearch = async (
     return results as unknown as IFigure[];
   }
 
-  // Atlas Search compound autocomplete query (searches both name and manufacturer)
+  // Atlas Search compound autocomplete query (searches name, manufacturer, and scale)
   try {
     const results = await Figure.aggregate([
       {
@@ -71,6 +72,12 @@ export const wordWheelSearch = async (
                   fuzzy: {
                     maxEdits: 1
                   }
+                }
+              },
+              {
+                text: {
+                  query: searchQuery,
+                  path: 'scale'
                 }
               }
             ],
@@ -119,7 +126,8 @@ export const wordWheelSearch = async (
       userId,
       $or: [
         { name: { $regex: `(^|\\s)${escapedQuery}`, $options: 'i' } },
-        { manufacturer: { $regex: `(^|\\s)${escapedQuery}`, $options: 'i' } }
+        { manufacturer: { $regex: `(^|\\s)${escapedQuery}`, $options: 'i' } },
+        { scale: { $regex: `^${escapedQuery}$`, $options: 'i' } }
       ]
     })
       .limit(limit)
@@ -162,7 +170,8 @@ export const partialSearch = async (
       userId,
       $or: [
         { name: { $regex: escapedQuery, $options: 'i' } },
-        { manufacturer: { $regex: escapedQuery, $options: 'i' } }
+        { manufacturer: { $regex: escapedQuery, $options: 'i' } },
+        { scale: { $regex: `^${escapedQuery}$`, $options: 'i' } }
       ]
     })
       .skip(offset)
@@ -173,7 +182,7 @@ export const partialSearch = async (
     return results as unknown as IFigure[];
   }
 
-  // Atlas Search text query for partial matching
+  // Atlas Search text query for partial matching (name, manufacturer, scale)
   try {
     const results = await Figure.aggregate([
       {
@@ -191,6 +200,12 @@ export const partialSearch = async (
                 text: {
                   query: searchQuery,
                   path: 'manufacturer'
+                }
+              },
+              {
+                text: {
+                  query: searchQuery,
+                  path: 'scale'
                 }
               }
             ]
@@ -241,7 +256,8 @@ export const partialSearch = async (
       userId,
       $or: [
         { name: { $regex: escapedQuery, $options: 'i' } },
-        { manufacturer: { $regex: escapedQuery, $options: 'i' } }
+        { manufacturer: { $regex: escapedQuery, $options: 'i' } },
+        { scale: { $regex: `^${escapedQuery}$`, $options: 'i' } }
       ]
     })
       .skip(offset)
@@ -282,6 +298,7 @@ export const figureSearch = async (
       $or: [
         { manufacturer: { $regex: term, $options: 'i' } },
         { name: { $regex: term, $options: 'i' } },
+        { scale: { $regex: `^${term}$`, $options: 'i' } },
         { location: { $regex: term, $options: 'i' } },
         { boxNumber: { $regex: term, $options: 'i' } }
       ]
@@ -295,7 +312,7 @@ export const figureSearch = async (
     return results as unknown as IFigure[];
   }
 
-  // Atlas Search with autocomplete for name and manufacturer
+  // Atlas Search with autocomplete for name, manufacturer, and scale
   try {
     const results = await Figure.aggregate([
       {
@@ -315,6 +332,12 @@ export const figureSearch = async (
                   query: searchQuery,
                   path: 'manufacturer',
                   fuzzy: { maxEdits: 1 }
+                }
+              },
+              {
+                text: {
+                  query: searchQuery,
+                  path: 'scale'
                 }
               }
             ],
@@ -361,6 +384,7 @@ export const figureSearch = async (
       $or: [
         { manufacturer: { $regex: term, $options: 'i' } },
         { name: { $regex: term, $options: 'i' } },
+        { scale: { $regex: `^${term}$`, $options: 'i' } },
         { location: { $regex: term, $options: 'i' } },
         { boxNumber: { $regex: term, $options: 'i' } }
       ]
