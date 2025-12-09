@@ -26,8 +26,8 @@ export const wordWheelSearch = async (
   // Escape special regex characters for safe searching
   const escapedQuery = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  // Check if we should use Atlas Search or fallback
-  const useAtlasSearch = process.env.NODE_ENV === 'production' &&
+  // Use Atlas Search when explicitly enabled via environment variable
+  const useAtlasSearch = process.env.ENABLE_ATLAS_SEARCH === 'true' &&
                         process.env.TEST_MODE !== 'memory' &&
                         !process.env.INTEGRATION_TEST;
 
@@ -143,8 +143,8 @@ export const partialSearch = async (
   // Escape special regex characters
   const escapedQuery = searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  // Check if we should use Atlas Search or fallback
-  const useAtlasSearch = process.env.NODE_ENV === 'production' &&
+  // Use Atlas Search when explicitly enabled via environment variable
+  const useAtlasSearch = process.env.ENABLE_ATLAS_SEARCH === 'true' &&
                         process.env.TEST_MODE !== 'memory' &&
                         !process.env.INTEGRATION_TEST;
 
@@ -232,6 +232,120 @@ export const partialSearch = async (
       .limit(limit)
       .sort({ name: 1 })
       .lean();
+
+    return results as unknown as IFigure[];
+  }
+};
+
+/**
+ * Figure Search - Full-text search for /figures/search endpoint
+ * Searches across name, manufacturer, location, and boxNumber fields
+ * Uses Atlas Search with autocomplete or regex fallback
+ */
+export const figureSearch = async (
+  query: string,
+  userId: mongoose.Types.ObjectId
+): Promise<IFigure[]> => {
+  if (!query || query.trim().length === 0) {
+    return [];
+  }
+
+  const searchQuery = query.trim();
+
+  // Use Atlas Search when explicitly enabled via environment variable
+  const useAtlasSearch = process.env.ENABLE_ATLAS_SEARCH === 'true' &&
+                        process.env.TEST_MODE !== 'memory' &&
+                        !process.env.INTEGRATION_TEST;
+
+  if (!useAtlasSearch) {
+    // Fallback: regex search across multiple fields
+    const searchTerms = searchQuery.split(' ').filter(term => term.trim().length > 0);
+
+    // Create regex patterns for each search term
+    const regexConditions = searchTerms.map(term => ({
+      $or: [
+        { manufacturer: { $regex: term, $options: 'i' } },
+        { name: { $regex: term, $options: 'i' } },
+        { location: { $regex: term, $options: 'i' } },
+        { boxNumber: { $regex: term, $options: 'i' } }
+      ]
+    }));
+
+    const results = await Figure.find({
+      userId,
+      $and: regexConditions
+    }).lean();
+
+    return results as unknown as IFigure[];
+  }
+
+  // Atlas Search with autocomplete for name and manufacturer
+  try {
+    const results = await Figure.aggregate([
+      {
+        $search: {
+          index: 'figures_search',
+          compound: {
+            should: [
+              {
+                autocomplete: {
+                  query: searchQuery,
+                  path: 'name',
+                  fuzzy: { maxEdits: 1 }
+                }
+              },
+              {
+                autocomplete: {
+                  query: searchQuery,
+                  path: 'manufacturer',
+                  fuzzy: { maxEdits: 1 }
+                }
+              }
+            ],
+            minimumShouldMatch: 1
+          }
+        }
+      },
+      {
+        $match: {
+          userId
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          manufacturer: 1,
+          name: 1,
+          scale: 1,
+          mfcLink: 1,
+          location: 1,
+          boxNumber: 1,
+          imageUrl: 1,
+          userId: 1,
+          createdAt: 1,
+          updatedAt: 1
+        }
+      }
+    ]);
+
+    return results as IFigure[];
+  } catch (error) {
+    console.error('[SEARCH] Atlas Search error, falling back to regex:', error);
+    // Fallback to regex if Atlas Search fails
+    const searchTerms = searchQuery.split(' ').filter(term => term.trim().length > 0);
+    const regexConditions = searchTerms.map(term => ({
+      $or: [
+        { manufacturer: { $regex: term, $options: 'i' } },
+        { name: { $regex: term, $options: 'i' } },
+        { location: { $regex: term, $options: 'i' } },
+        { boxNumber: { $regex: term, $options: 'i' } }
+      ]
+    }));
+
+    const results = await Figure.find({
+      userId,
+      $and: regexConditions
+    }).lean();
 
     return results as unknown as IFigure[];
   }

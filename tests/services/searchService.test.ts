@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import Figure from '../../src/models/Figure';
 import User from '../../src/models/User';
-import { wordWheelSearch, partialSearch } from '../../src/services/searchService';
+import { wordWheelSearch, partialSearch, figureSearch } from '../../src/services/searchService';
 
 describe('Search Service - Word Wheel Search', () => {
   let testUser: any;
@@ -246,6 +246,134 @@ describe('Search Service - Partial Search', () => {
 
     it('should handle special characters safely', async () => {
       const results = await partialSearch('test$char*', testUserId);
+
+      expect(results).toBeInstanceOf(Array);
+      // Should not throw error
+    });
+  });
+});
+
+describe('Search Service - Figure Search', () => {
+  let testUser: any;
+  let testUserId: mongoose.Types.ObjectId;
+
+  beforeEach(async () => {
+    testUser = new User({
+      username: 'figuresearchtest',
+      email: 'figuresearch@example.com',
+      password: 'password123'
+    });
+    await testUser.save();
+    testUserId = testUser._id;
+
+    await Figure.insertMany([
+      {
+        manufacturer: 'Good Smile Company',
+        name: 'Hatsune Miku',
+        scale: '1/8',
+        location: 'Shelf A',
+        boxNumber: 'Box 001',
+        userId: testUserId
+      },
+      {
+        manufacturer: 'Alter',
+        name: 'Mikasa Ackerman',
+        scale: '1/7',
+        location: 'Shelf B',
+        boxNumber: 'Box 002',
+        userId: testUserId
+      },
+      {
+        manufacturer: 'Good Smile Company',
+        name: 'Megumin',
+        scale: '1/8',
+        location: 'Display Cabinet',
+        boxNumber: 'Box 003',
+        userId: testUserId
+      }
+    ]);
+  });
+
+  describe('figureSearch', () => {
+    it('should find figures by name', async () => {
+      const results = await figureSearch('Miku', testUserId);
+
+      expect(results).toBeInstanceOf(Array);
+      expect(results.some(r => r.name === 'Hatsune Miku')).toBe(true);
+    });
+
+    it('should find figures by manufacturer', async () => {
+      const results = await figureSearch('Good Smile', testUserId);
+
+      expect(results).toBeInstanceOf(Array);
+      expect(results.length).toBe(2);
+      expect(results.every(r => r.manufacturer === 'Good Smile Company')).toBe(true);
+    });
+
+    it('should find figures by location', async () => {
+      const results = await figureSearch('Shelf', testUserId);
+
+      expect(results).toBeInstanceOf(Array);
+      expect(results.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('should find figures by boxNumber', async () => {
+      const results = await figureSearch('Box 001', testUserId);
+
+      expect(results).toBeInstanceOf(Array);
+      expect(results.some(r => r.boxNumber === 'Box 001')).toBe(true);
+    });
+
+    it('should be case insensitive', async () => {
+      const results = await figureSearch('miku', testUserId);
+
+      expect(results).toBeInstanceOf(Array);
+      expect(results.some(r => r.name === 'Hatsune Miku')).toBe(true);
+    });
+
+    it('should handle multi-word searches', async () => {
+      const results = await figureSearch('Hatsune Miku', testUserId);
+
+      expect(results).toBeInstanceOf(Array);
+      expect(results.some(r => r.name === 'Hatsune Miku')).toBe(true);
+    });
+
+    it('should only return figures for the specified user', async () => {
+      const otherUser = new User({
+        username: 'otheruser3',
+        email: 'other3@example.com',
+        password: 'password123'
+      });
+      await otherUser.save();
+
+      await Figure.create({
+        manufacturer: 'Good Smile Company',
+        name: 'Other User Miku',
+        userId: otherUser._id
+      });
+
+      const results = await figureSearch('Miku', testUserId);
+
+      expect(results.every(r => r.userId.toString() === testUserId.toString())).toBe(true);
+      expect(results.some(r => r.name === 'Other User Miku')).toBe(false);
+    });
+
+    it('should return empty array for empty query', async () => {
+      const results = await figureSearch('', testUserId);
+
+      expect(results).toBeInstanceOf(Array);
+      expect(results.length).toBe(0);
+    });
+
+    it('should return empty array for no matches', async () => {
+      const results = await figureSearch('NonexistentQuery123', testUserId);
+
+      expect(results).toBeInstanceOf(Array);
+      expect(results.length).toBe(0);
+    });
+
+    it('should handle special characters safely', async () => {
+      const results = await figureSearch('test$pecial*Chars', testUserId);
 
       expect(results).toBeInstanceOf(Array);
       // Should not throw error
