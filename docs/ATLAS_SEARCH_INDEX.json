@@ -2,40 +2,22 @@
   "mappings": {
     "dynamic": false,
     "fields": {
-      "name": [
-        {
-          "type": "string",
-          "analyzer": "lucene.standard"
-        },
-        {
-          "type": "autocomplete",
-          "analyzer": "lucene.whitespace",
-          "tokenization": "edgeGram",
-          "minGrams": 2,
-          "maxGrams": 15,
-          "foldDiacritics": true
-        }
-      ],
-      "manufacturer": [
-        {
-          "type": "string",
-          "analyzer": "lucene.standard"
-        },
-        {
-          "type": "autocomplete",
-          "analyzer": "lucene.whitespace",
-          "tokenization": "edgeGram",
-          "minGrams": 2,
-          "maxGrams": 15,
-          "foldDiacritics": true
-        }
-      ],
-      "scale": {
-        "type": "string",
-        "analyzer": "lucene.keyword"
+      "manufacturer": {
+        "foldDiacritics": true,
+        "maxGrams": 15,
+        "minGrams": 3,
+        "tokenization": "nGram",
+        "type": "autocomplete"
       },
-      "userId": {
-        "type": "objectId"
+      "name": {
+        "foldDiacritics": true,
+        "maxGrams": 15,
+        "minGrams": 3,
+        "tokenization": "nGram",
+        "type": "autocomplete"
+      },
+      "scale": {
+        "type": "token"
       }
     }
   }
