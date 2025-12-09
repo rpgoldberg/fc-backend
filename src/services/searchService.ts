@@ -8,7 +8,7 @@ export interface SearchOptions {
 
 /**
  * Word Wheel Search - Autocomplete suggestions as user types
- * Minimum 2 characters required
+ * Minimum 3 characters required (matches Atlas Search minGrams: 3)
  * Uses Atlas Search autocomplete analyzer or regex fallback
  */
 export const wordWheelSearch = async (
@@ -16,8 +16,8 @@ export const wordWheelSearch = async (
   userId: mongoose.Types.ObjectId,
   limit: number = 10
 ): Promise<IFigure[]> => {
-  // Require minimum 2 characters
-  if (!query || query.trim().length < 2) {
+  // Require minimum 3 characters (matches Atlas Search minGrams configuration)
+  if (!query || query.trim().length < 3) {
     return [];
   }
 
@@ -47,18 +47,34 @@ export const wordWheelSearch = async (
     return results as unknown as IFigure[];
   }
 
-  // Atlas Search autocomplete query
+  // Atlas Search compound autocomplete query (searches both name and manufacturer)
   try {
     const results = await Figure.aggregate([
       {
         $search: {
           index: 'figures_search',
-          autocomplete: {
-            query: searchQuery,
-            path: 'name',
-            fuzzy: {
-              maxEdits: 1
-            }
+          compound: {
+            should: [
+              {
+                autocomplete: {
+                  query: searchQuery,
+                  path: 'name',
+                  fuzzy: {
+                    maxEdits: 1
+                  }
+                }
+              },
+              {
+                autocomplete: {
+                  query: searchQuery,
+                  path: 'manufacturer',
+                  fuzzy: {
+                    maxEdits: 1
+                  }
+                }
+              }
+            ],
+            minimumShouldMatch: 1
           }
         }
       },
@@ -108,7 +124,7 @@ export const wordWheelSearch = async (
 
 /**
  * Partial Search - Finds partial matches within words
- * Minimum 2 characters required
+ * Minimum 3 characters required (matches Atlas Search minGrams: 3)
  * Uses n-gram and wildcard analyzers or regex fallback
  */
 export const partialSearch = async (
@@ -116,8 +132,8 @@ export const partialSearch = async (
   userId: mongoose.Types.ObjectId,
   options: SearchOptions = {}
 ): Promise<IFigure[]> => {
-  // Require minimum 2 characters
-  if (!query || query.trim().length < 2) {
+  // Require minimum 3 characters (matches Atlas Search minGrams configuration)
+  if (!query || query.trim().length < 3) {
     return [];
   }
 
