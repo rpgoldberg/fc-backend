@@ -49,7 +49,7 @@ describe('Validation Middleware', () => {
         message: 'Validation Error',
         errors: expect.arrayContaining([
           expect.objectContaining({ path: ['name'] }),
-          expect.objectContaining({ path: ['manufacturer'] }),
+          // Schema v3: manufacturer is now optional
           expect.objectContaining({ path: ['type'] })
         ])
       }));

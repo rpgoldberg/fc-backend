@@ -5,6 +5,7 @@ import userRoutes from '../../src/routes/userRoutes';
 import authRoutes from '../../src/routes/authRoutes';
 // Note: searchRoutes removed - frontend uses /figures/search
 import adminRoutes, { publicConfigRouter } from '../../src/routes/adminRoutes';
+import lookupRoutes from '../../src/routes/lookupRoutes';
 
 // Create test app
 export const createTestApp = () => {
@@ -21,6 +22,7 @@ export const createTestApp = () => {
   app.use('/users', userRoutes);
   // app.use('/api/search', searchRoutes); // Removed - frontend uses /figures/search
   app.use('/admin', adminRoutes);
+  app.use('/lookup', lookupRoutes);
   app.use('/', publicConfigRouter);
 
   // Health check endpoint - updated to match new format

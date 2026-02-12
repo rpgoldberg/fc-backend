@@ -53,6 +53,39 @@ RUN apk update && \
 3. Run security scans on final production image, not just source code
 4. Check security scan results carefully - vulnerabilities may come from base image, not your code
 
+## Zero Trust Authentication
+
+The authentication middleware implements zero trust principles:
+
+### User Existence Validation
+Every protected request validates that the user exists in the **current database**, not just that the JWT signature is valid. This prevents:
+- Stale JWTs from other database instances being accepted
+- Tokens for deleted users continuing to work
+- Cross-environment token reuse when running multiple instances on the same port
+
+### Implementation
+```typescript
+// In authMiddleware.ts - protect middleware
+const userExists = await User.exists({ _id: decoded.id });
+if (!userExists) {
+  return res.status(401).json({
+    success: false,
+    message: 'User not found - session invalid',
+    code: 'USER_NOT_FOUND'
+  });
+}
+```
+
+### Error Codes
+| Code | Meaning |
+|------|---------|
+| `TOKEN_EXPIRED` | JWT has expired, needs refresh |
+| `INVALID_TOKEN` | JWT signature is invalid |
+| `USER_NOT_FOUND` | JWT valid but user doesn't exist in current database |
+
+### Performance
+`User.exists()` is MongoDB's most efficient existence check, returning only `{ _id }` or `null` rather than the full document. Overhead is approximately 1ms per request.
+
 ## Security Best Practices
 
 1. Never commit `.env` files (already in `.gitignore`)

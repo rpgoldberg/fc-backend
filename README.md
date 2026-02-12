@@ -10,6 +10,7 @@ Backend API service for the Figure Collector application. Provides endpoints for
 - Filtering and statistics
 - Service version orchestration and aggregation
 - Service health monitoring and version reporting
+- **Schema v3.0**: Enhanced data models for MFC integration (RoleType, Company, Artist, MFCItem, UserFigure, SearchIndex)
 
 ## Technology Stack
 
@@ -27,6 +28,20 @@ The backend acts as the central orchestrator for service version reporting:
 - **Version Aggregation**: Backend's `/version` endpoint aggregates health status from all services
 - **Unified API**: Single `/version` endpoint provides complete service health and version information
 - **Frontend Integration**: Frontend enriches aggregated data with its own version from package.json
+
+## Recent Updates
+
+### Development Server (tsx)
+Switched from `ts-node-dev` to `tsx` for faster development server startup:
+- **tsx** uses esbuild under the hood for near-instant TypeScript compilation
+- Automatic `.env` file loading via `--env-file` flag
+- Hot reload with `tsx watch` for seamless development
+
+### SSE Token Support
+Auth middleware now supports query parameter tokens for SSE (Server-Sent Events) connections:
+- EventSource API cannot set custom headers, requiring token in URL
+- Format: `/sync/events/:sessionId?token=<jwt>`
+- Falls back to standard `Authorization: Bearer <token>` header when available
 
 ## Development
 
@@ -64,7 +79,7 @@ npm install
 # Start MongoDB (if using local MongoDB)
 docker run -d -p 27017:27017 --name mongodb mongo:latest
 
-# Start development server
+# Start development server (uses tsx for fast startup)
 npm run dev
 
 # Build for production
@@ -162,10 +177,11 @@ See `.env.example` for complete configuration template. Run `./setup-local-env.s
 - `JWT_SECRET`: Secret for JWT token signing (⚠️ **MUST be at least 32 characters in production**)
 - `JWT_REFRESH_SECRET`: Secret for refresh token signing (⚠️ **MUST be at least 32 characters in production**)
 - `SCRAPER_SERVICE_URL`: URL to scraper service
-  - Local: `http://localhost:3000`
-  - Docker/Coolify: `http://scraper:3000` or `http://scraper-dev:3010`
+  - Local dev: `http://localhost:3080`
+  - Docker prod: `http://scraper:3050`
+  - Docker Coolify dev: `http://scraper-dev:3090`
   - (Must match service/network name for container DNS resolution)
-- `PORT`: Port for backend service (default: 5000)
+- `PORT`: Port for backend service (prod: 5050, local dev: 5080)
 - `NODE_ENV`: Environment (development/production)
 
 **Optional:**
@@ -174,6 +190,9 @@ See `.env.example` for complete configuration template. Run `./setup-local-env.s
 - `ADMIN_BOOTSTRAP_TOKEN`: Secret token for granting admin privileges via `POST /admin/bootstrap`
   - Generate a secure token: `openssl rand -base64 32`
   - After granting admin to your user, the token can be changed or removed
+- `ENABLE_ATLAS_SEARCH`: Set to `true` on environments with Atlas Search indexes configured
+  - Enables Atlas Search `$search` operator for advanced search features
+  - Falls back to regex search when not set or when `TEST_MODE=memory`
 
 **Debug Logging:**
 - `DEBUG`: Enable debug namespaces (e.g., `backend:*`, `backend:auth`, `backend:registration`)
@@ -191,6 +210,7 @@ The authentication system uses a two-token strategy with enhanced security:
 - **Refresh Token**: Long-lived cryptographically secure token (7 days expiry) stored as HMAC-SHA256 hash in MongoDB
 
 Security Features:
+- **Zero Trust Validation**: Every protected request validates user exists in the current database (prevents cross-environment token reuse)
 - **Hashed Storage**: Refresh tokens are hashed using HMAC-SHA256 before database storage
 - **Secure Generation**: Refresh tokens use cryptographically secure random generation
 - **Token Rotation**: Optional refresh token rotation on each use (configurable)
@@ -208,9 +228,26 @@ Token Response Structure:
 }
 ```
 
+## Schema v3.0 Data Models
+
+Schema v3.0 introduces enhanced data models for MFC (MyFigureCollection) integration:
+
+| Model | Purpose | Key Features |
+|-------|---------|--------------|
+| **RoleType** | Dynamic role registry | Company/Artist/Relation kinds, system seeding |
+| **Company** | Manufacturers, distributors | Role-based categorization, MFC ID linking |
+| **Artist** | Sculptors, illustrators | Role-based categorization, portfolio linking |
+| **MFCItem** | Shared catalog data | Releases, dimensions, community stats |
+| **UserFigure** | User-specific data | Collection status, purchase info, ratings |
+| **SearchIndex** | Unified search | Cross-entity search, Atlas 3-index limit workaround |
+
+**Automatic Seeding**: System role types (Manufacturer, Sculptor, etc.) are seeded automatically on app startup. This is idempotent and safe to run on every deployment.
+
+**Atlas Search**: See `docs/SCHEMA_V3_INDEX_GUIDE.md` for index configuration and deployment procedures.
+
 ## 🧪 Testing
 
-The backend includes extensive test infrastructure with enhanced Docker testing, comprehensive test suites, and robust automation scripts. We now have 400/400 tests passing, covering multiple dimensions of application functionality across multiple test configurations. The enhanced MongoDB Memory Server provides robust, isolated testing capabilities. All tests now pass without any skipped tests, focusing on essential database connection and API functionality.
+The backend includes extensive test infrastructure with enhanced Docker testing, comprehensive test suites, and robust automation scripts. We now have **597+ tests passing**, covering multiple dimensions of application functionality across multiple test configurations. The enhanced MongoDB Memory Server provides robust, isolated testing capabilities. All tests now pass without any skipped tests, focusing on essential database connection and API functionality.
 
 ### Test Coverage
 
@@ -225,6 +262,13 @@ The backend includes extensive test infrastructure with enhanced Docker testing,
 
 ```
 tests/
+├── models/               # Schema v3.0 model tests (TDD)
+│   ├── RoleType.test.ts  # Role registry with system seeding
+│   ├── Company.test.ts   # Company model with role refs
+│   ├── Artist.test.ts    # Artist model
+│   ├── MFCItem.test.ts   # MFC catalog data
+│   ├── UserFigure.test.ts # User collection data
+│   └── SearchIndex.test.ts # Unified search index
 ├── unit/
 │   ├── models/           # User, Figure, and RefreshToken model tests
 │   ├── controllers/      # Authentication and business logic tests

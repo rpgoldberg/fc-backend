@@ -11,14 +11,14 @@ services:
     restart: unless-stopped
     environment:
       - NODE_ENV=${ENVIRONMENT:-development}
-      - PORT=${BACKEND_PORT:-5070}
+      - PORT=${BACKEND_PORT:-5090}
       - MONGODB_URI=${MONGODB_URI}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
       - SCRAPER_SERVICE_URL=${SCRAPER_SERVICE_URL}
       - SERVICE_AUTH_TOKEN=${SERVICE_AUTH_TOKEN}
     ports:
-      - "${BACKEND_PORT:-5070}:${BACKEND_PORT:-5070}"
+      - "${BACKEND_PORT:-5090}:${BACKEND_PORT:-5090}"
     volumes:
       - ../fc-backend/src:/app/src
       - ../fc-backend/package.json:/app/package.json
@@ -40,13 +40,13 @@ services:
     restart: unless-stopped
     environment:
       - NODE_ENV=${ENVIRONMENT:-development}
-      - PORT=${FRONTEND_PORT:-5071}
+      - PORT=${FRONTEND_PORT:-5091}
       - REACT_APP_API_URL=${REACT_APP_API_URL}
       - BACKEND_HOST=${BACKEND_HOST}
       - BACKEND_PORT=${BACKEND_PORT}
       - FRONTEND_PORT=${FRONTEND_PORT}
     ports:
-      - "${FRONTEND_PORT:-5071}:${FRONTEND_PORT:-5071}"
+      - "${FRONTEND_PORT:-5091}:${FRONTEND_PORT:-5091}"
     volumes:
       - ../fc-frontend/src:/app/src
       - ../fc-frontend/public:/app/public
@@ -66,10 +66,10 @@ services:
     restart: unless-stopped
     environment:
       - NODE_ENV=${ENVIRONMENT:-development}
-      - PORT=${SCRAPER_PORT:-3010}
+      - PORT=${SCRAPER_PORT:-3090}
       - SERVICE_AUTH_TOKEN=${SERVICE_AUTH_TOKEN}
     ports:
-      - "${SCRAPER_PORT:-3010}:${SCRAPER_PORT:-3010}"
+      - "${SCRAPER_PORT:-3090}:${SCRAPER_PORT:-3090}"
     volumes:
       - ../scraper/src:/app/src
       - ../scraper/package.json:/app/package.json

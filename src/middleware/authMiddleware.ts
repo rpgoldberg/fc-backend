@@ -9,8 +9,18 @@ interface JwtPayload {
 // User type is already declared in src/types/express.d.ts
 
 export const protect = async (req: Request, res: Response, next: NextFunction): Promise<void | Response> => {
-  // Early check for Authorization header
-  if (!req.headers.authorization || !req.headers.authorization.startsWith('Bearer')) {
+  let token: string | undefined;
+
+  // Check Authorization header first
+  if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+  // Fall back to query parameter (for SSE connections that can't use headers)
+  else if (req.query.token && typeof req.query.token === 'string') {
+    token = req.query.token;
+  }
+
+  if (!token) {
     return res.status(401).json({
       success: false,
       message: 'Not authorized, no token'
@@ -18,15 +28,24 @@ export const protect = async (req: Request, res: Response, next: NextFunction): 
   }
 
   try {
-    // Get token from header
-    const token = req.headers.authorization.split(' ')[1];
 
-    // Verify token
+    // Verify token signature
     const secret = process.env.JWT_SECRET;
     if (!secret) {
       throw new Error('JWT_SECRET not configured');
     }
     const decoded = jwt.verify(token, secret) as JwtPayload;
+
+    // ZERO TRUST: Verify user exists in database on every request
+    // This prevents tokens from other database instances from being accepted
+    const userExists = await User.exists({ _id: decoded.id });
+    if (!userExists) {
+      return res.status(401).json({
+        success: false,
+        message: 'User not found - session invalid',
+        code: 'USER_NOT_FOUND'
+      });
+    }
 
     // Add user ID to request
     req.user = {
@@ -46,7 +65,7 @@ export const protect = async (req: Request, res: Response, next: NextFunction): 
         code: 'TOKEN_EXPIRED'
       });
     }
-    
+
     if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({
         success: false,

@@ -1,0 +1,61 @@
+{
+  "name": "mfcitems_search",
+  "collectionName": "mfcitems",
+  "mappings": {
+    "dynamic": false,
+    "fields": {
+      "name": [
+        {
+          "type": "string",
+          "analyzer": "lucene.standard"
+        },
+        {
+          "type": "autocomplete",
+          "tokenization": "edgeGram",
+          "minGrams": 2,
+          "maxGrams": 15,
+          "foldDiacritics": true
+        }
+      ],
+      "tags": [
+        {
+          "type": "string",
+          "analyzer": "lucene.keyword"
+        },
+        {
+          "type": "token",
+          "normalizer": "lowercase"
+        }
+      ],
+      "scale": {
+        "type": "string",
+        "analyzer": "lucene.keyword"
+      },
+      "mfcId": {
+        "type": "number"
+      },
+      "companies": {
+        "type": "document",
+        "fields": {
+          "companyId": {
+            "type": "objectId"
+          },
+          "roleId": {
+            "type": "objectId"
+          }
+        }
+      },
+      "artists": {
+        "type": "document",
+        "fields": {
+          "artistId": {
+            "type": "objectId"
+          },
+          "roleId": {
+            "type": "objectId"
+          }
+        }
+      }
+    }
+  }
+}
