@@ -8,6 +8,8 @@ import authRoutes from './routes/authRoutes';
 // Note: /api/search routes removed - frontend uses /figures/search
 // import searchRoutes from './routes/searchRoutes';
 import adminRoutes, { publicConfigRouter } from './routes/adminRoutes';
+import syncRoutes from './routes/syncRoutes';
+import lookupRoutes from './routes/lookupRoutes';
 import { connectDB } from './config/db';
 import { globalErrorHandler } from './middleware/validationMiddleware';
 import * as packageJson from '../package.json';
@@ -21,7 +23,7 @@ dotenv.config();
 // Initialize Express app
 const app = express();
 export { app };
-const PORT = parseInt(process.env.PORT || '5000', 10);
+const PORT = parseInt(process.env.PORT || '5080', 10);
 
 // Trust proxy - required for express-rate-limit behind reverse proxy (Coolify/Traefik)
 // See: https://express-rate-limit.github.io/ERR_ERL_UNEXPECTED_X_FORWARDED_FOR/
@@ -44,6 +46,8 @@ app.use('/figures', figureRoutes);
 app.use('/users', userRoutes);
 // app.use('/api/search', searchRoutes); // Removed - frontend uses /figures/search
 app.use('/admin', adminRoutes);
+app.use('/sync', syncRoutes);
+app.use('/lookup', lookupRoutes);
 app.use('/', publicConfigRouter);
 
 // Health check endpoint - validates MongoDB connection
@@ -67,7 +71,7 @@ app.get('/health', (req, res) => {
 // Version endpoint - aggregates versions from all services via their /health endpoints
 app.get('/version', async (req, res) => {
   try {
-    const scraperUrl = process.env.SCRAPER_SERVICE_URL || 'http://scraper:3000'; // NOSONAR - internal Docker network
+    const scraperUrl = process.env.SCRAPER_SERVICE_URL || 'http://scraper:3050'; // NOSONAR - internal Docker network
 
     // Backend version (self)
     const backend = {

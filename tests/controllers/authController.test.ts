@@ -527,7 +527,7 @@ describe('AuthController', () => {
       });
     });
 
-    it('should return 404 when user not found', async () => {
+    it('should return 401 when user not found (zero trust - session invalid)', async () => {
       mockRequest.user = { id: 'user123' } as any;
       MockedUser.findById = jest.fn().mockReturnValue({
         select: jest.fn().mockResolvedValue(null)
@@ -535,10 +535,12 @@ describe('AuthController', () => {
 
       await getProfile(mockRequest as Request, mockResponse as Response);
 
-      expect(mockResponse.status).toHaveBeenCalledWith(404);
+      // Returns 401 because if user doesn't exist, the JWT session is invalid
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
       expect(mockResponse.json).toHaveBeenCalledWith({
         success: false,
-        message: 'User not found'
+        message: 'User not found - session invalid',
+        code: 'USER_NOT_FOUND'
       });
     });
 

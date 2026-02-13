@@ -401,12 +401,15 @@ describe('Database Integration Tests', () => {
       await expect(userWithoutPassword.save()).rejects.toThrow();
 
       // Test Figure required fields
+      // Schema v3: manufacturer is now optional (derived from companyRoles)
       const figureWithoutManufacturer = new Figure({
         name: 'Test Figure',
         userId: new mongoose.Types.ObjectId()
       });
 
-      await expect(figureWithoutManufacturer.save()).rejects.toThrow();
+      // Should NOT throw - manufacturer is optional in Schema v3
+      const savedFigure = await figureWithoutManufacturer.save();
+      expect(savedFigure._id).toBeDefined();
 
       const figureWithoutName = new Figure({
         manufacturer: 'Test Manufacturer',

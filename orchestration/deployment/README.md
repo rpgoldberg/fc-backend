@@ -64,7 +64,7 @@ The page scraper service has special requirements due to browser automation:
 
 **Environment Variables:**
 - `NODE_ENV`: Environment (development/test/production)
-- `PORT`: Service port (3010 dev, 3005 test, 3000 prod)
+- `PORT`: Service port (3090 Coolify dev, 3080 local dev, 3070 test, 3050 prod)
 
 **Health Check:**
 - Endpoint: `GET /health`

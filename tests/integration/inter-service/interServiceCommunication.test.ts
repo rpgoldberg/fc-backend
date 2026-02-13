@@ -8,7 +8,7 @@ jest.mock('axios');
 jest.mock('node-fetch', () => jest.fn());
 
 // Environment configuration
-const SCRAPER_SERVICE_URL = process.env.SCRAPER_SERVICE_URL || 'http://scraper:3000';
+const SCRAPER_SERVICE_URL = process.env.SCRAPER_SERVICE_URL || 'http://scraper:3050';
 
 describe('Inter-Service Communication', () => {
   let app: Express;

@@ -8,6 +8,9 @@
  * Security: Uses sanitizeForLog to prevent log injection attacks (CWE-117)
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
+
 const DEBUG = process.env.DEBUG === 'true';
 const TEST_MODE = process.env.TEST_MODE === 'memory' || process.env.NODE_ENV === 'test';
 const DEBUG_LEVEL = process.env.DEBUG_LEVEL || (process.env.NODE_ENV === 'development' ? 'info' : 'error');
@@ -133,3 +136,112 @@ export const dbLogger = createLogger('DATABASE');
 
 // Export the Logger class for custom instances
 export default Logger;
+
+/**
+ * Sync tracking logger for MFC sync analysis.
+ * These logs are always written (not debug-gated) for later analysis.
+ * Writes to both console AND file for persistence.
+ *
+ * View logs: cat logs/sync.log | grep "FAILURE"
+ */
+export interface SyncEvent {
+  event: 'job_start' | 'job_complete' | 'item_saved' | 'item_failed' | 'webhook_received' | 'phase_change' | 'error';
+  sessionId: string;
+  mfcId?: string;
+  phase?: string;
+  status?: string;
+  total?: number;
+  completed?: number;
+  failed?: number;
+  errorType?: string;
+  reason?: string;
+}
+
+// Ensure logs directory exists (skip in test mode)
+let syncLogPath: string | null = null;
+if (!TEST_MODE) {
+  const logsDir = path.join(process.cwd(), 'logs');
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
+  }
+  syncLogPath = path.join(logsDir, 'sync.log');
+}
+
+export const syncLogger = {
+  /**
+   * Log a sync event in structured format for later analysis
+   * Writes to both console AND file for persistence
+   */
+  log(event: SyncEvent): void {
+    const timestamp = new Date().toISOString();
+    const entry = {
+      timestamp,
+      component: 'SYNC',
+      ...event,
+    };
+    // Sanitize user-provided values before logging and file write
+    const safeSessionId = sanitizeLogValue(event.sessionId);
+    const safeMfcId = event.mfcId ? sanitizeLogValue(event.mfcId) : '';
+    const safeEntry = JSON.stringify(entry);
+    const logLine = `[${timestamp}] [SYNC] ${event.event.toUpperCase()} session=${safeSessionId}${safeMfcId ? ` mfcId=${safeMfcId}` : ''} ${safeEntry}`;
+
+    // Console output
+    console.log(logLine);
+
+    // File output (append) - skip in test mode
+    // Sanitize entire log line before file write to prevent log poisoning
+    if (syncLogPath) {
+      const sanitizedLine = String(logLine).replace(/[\r\n]/g, ' ').replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+      fs.appendFileSync(syncLogPath, sanitizedLine + '\n'); // lgtm[js/http-to-file-access]
+    }
+  },
+
+  /**
+   * Log sync job start
+   */
+  jobStart(sessionId: string, total: number): void {
+    this.log({ event: 'job_start', sessionId, total });
+  },
+
+  /**
+   * Log sync job completion
+   */
+  jobComplete(sessionId: string, completed: number, failed: number, total: number): void {
+    this.log({ event: 'job_complete', sessionId, completed, failed, total, status: failed > 0 ? 'partial' : 'success' });
+  },
+
+  /**
+   * Log successful item save
+   */
+  itemSaved(sessionId: string, mfcId: string): void {
+    this.log({ event: 'item_saved', sessionId, mfcId });
+  },
+
+  /**
+   * Log failed item save
+   */
+  itemFailed(sessionId: string, mfcId: string, errorType: string, reason: string): void {
+    this.log({ event: 'item_failed', sessionId, mfcId, errorType, reason });
+  },
+
+  /**
+   * Log webhook received
+   */
+  webhookReceived(sessionId: string, mfcId?: string): void {
+    this.log({ event: 'webhook_received', sessionId, mfcId });
+  },
+
+  /**
+   * Log phase change
+   */
+  phaseChange(sessionId: string, phase: string, completed?: number, total?: number): void {
+    this.log({ event: 'phase_change', sessionId, phase, completed, total });
+  },
+
+  /**
+   * Log sync error
+   */
+  error(sessionId: string, errorType: string, reason: string): void {
+    this.log({ event: 'error', sessionId, errorType, reason });
+  },
+};

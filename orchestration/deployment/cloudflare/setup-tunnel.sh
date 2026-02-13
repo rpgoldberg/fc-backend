@@ -29,7 +29,7 @@ ingress:
   - hostname: api.figures.yourdomain.com
     service: http://figure-server:5050
   - hostname: scraper.figures.yourdomain.com
-    service: http://figure-server:3000
+    service: http://figure-server:3050
   - service: http_status:404
 EOL
 

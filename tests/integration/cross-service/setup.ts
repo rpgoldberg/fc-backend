@@ -6,9 +6,9 @@ import { MongoClient } from 'mongodb';
 const isInsideDocker = process.env.INSIDE_DOCKER === 'true';
 
 export const TEST_CONFIG = {
-  BACKEND_URL: process.env.BACKEND_URL || (isInsideDocker ? 'http://backend-test:5055' : 'http://localhost:5055'),
-  FRONTEND_URL: process.env.FRONTEND_URL || (isInsideDocker ? 'http://frontend-test:5056' : 'http://localhost:5056'),
-  SCRAPER_URL: process.env.SCRAPER_URL || (isInsideDocker ? 'http://scraper-test:3005' : 'http://localhost:3005'),
+  BACKEND_URL: process.env.BACKEND_URL || (isInsideDocker ? 'http://backend-test:5070' : 'http://localhost:5070'),
+  FRONTEND_URL: process.env.FRONTEND_URL || (isInsideDocker ? 'http://frontend-test:5071' : 'http://localhost:5071'),
+  SCRAPER_URL: process.env.SCRAPER_URL || (isInsideDocker ? 'http://scraper-test:3070' : 'http://localhost:3070'),
   MONGODB_URI: process.env.MONGODB_URI || 'mongodb://testuser:testpass@localhost:27018/figure-collector-test?authSource=admin',
   TEST_TIMEOUT: parseInt(process.env.TEST_TIMEOUT || '180000'),
 };

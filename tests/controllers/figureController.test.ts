@@ -64,6 +64,7 @@ describe('FigureController', () => {
     mockResponse = {
       status: jest.fn().mockReturnThis(),
       json: jest.fn().mockReturnThis(),
+      setHeader: jest.fn().mockReturnThis(),
     };
     mockNext = jest.fn();
     
@@ -204,16 +205,18 @@ describe('FigureController', () => {
 
       await figureController.createFigure(mockRequest as Request, mockResponse as Response);
 
-      expect(MockedFigure.create).toHaveBeenCalledWith({
-        manufacturer: 'Good Smile Company',
-        name: 'Hatsune Miku',
-        scale: '1/8',
-        mfcLink: '',
-        location: 'Shelf A',
-        boxNumber: 'Box 1',
-        imageUrl: '',
-        userId: '000000000000000000000123'
-      });
+      expect(MockedFigure.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          manufacturer: 'Good Smile Company',
+          name: 'Hatsune Miku',
+          scale: '1/8',
+          mfcLink: '',
+          location: 'Shelf A',
+          boxNumber: 'Box 1',
+          imageUrl: '',
+          userId: '000000000000000000000123'
+        })
+      );
       expect(mockResponse.status).toHaveBeenCalledWith(201);
       expect(mockResponse.json).toHaveBeenCalledWith({
         success: true,
@@ -258,20 +261,23 @@ describe('FigureController', () => {
       await figureController.createFigure(mockRequest as Request, mockResponse as Response);
 
       expect(mockedAxios.post).toHaveBeenCalledWith(
-        'http://scraper-dev:3000/scrape/mfc',
+        'http://scraper-dev:3090/scrape/mfc',
         { url: 'https://myfigurecollection.net/item/12345' },
         expect.any(Object)
       );
-      expect(MockedFigure.create).toHaveBeenCalledWith({
-        manufacturer: 'Good Smile Company',
-        name: 'Hatsune Miku',
-        scale: '1/8',
-        mfcLink: 'https://myfigurecollection.net/item/12345',
-        location: '',
-        boxNumber: '',
-        imageUrl: 'https://example.com/image.jpg',
-        userId: '000000000000000000000123'
-      });
+      expect(MockedFigure.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          manufacturer: 'Good Smile Company',
+          name: 'Hatsune Miku',
+          scale: '1/8',
+          mfcLink: '12345', // Normalized to just ID
+          mfcId: 12345,     // Extracted from URL
+          location: '',
+          boxNumber: '',
+          imageUrl: 'https://example.com/image.jpg',
+          userId: '000000000000000000000123'
+        })
+      );
     });
 
     it('should handle scraping service failure with fallback', async () => {
@@ -673,38 +679,74 @@ describe('FigureController', () => {
 
       await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
 
-      expect(MockedFigure.find).toHaveBeenCalledWith({
-        userId: '000000000000000000000123',
-        manufacturer: { $regex: 'GSC', $options: 'i' },
-        scale: { $regex: '1/8', $options: 'i' },
-        location: { $regex: 'Shelf', $options: 'i' }
-      });
+      // Manufacturer filter now uses $and with $or to search both legacy field and companyRoles
+      // Scale/location use anchored regex for exact matching
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          userId: '000000000000000000000123',
+          $and: expect.arrayContaining([
+            expect.objectContaining({
+              $or: expect.arrayContaining([
+                expect.objectContaining({ manufacturer: expect.any(RegExp) }),
+                expect.objectContaining({
+                  companyRoles: expect.objectContaining({
+                    $elemMatch: expect.objectContaining({
+                      roleName: 'Manufacturer',
+                      companyName: expect.any(RegExp)
+                    })
+                  })
+                })
+              ])
+            })
+          ]),
+          scale: expect.objectContaining({ $regex: expect.any(String) }),
+          location: expect.objectContaining({ $regex: 'Shelf' })
+        })
+      );
     });
   });
 
   describe('getFigureStats', () => {
     it('should return figure statistics', async () => {
-      const mockStatsResults = [
+      const mockManufacturerStats = [
         { _id: 'GSC', count: 5 },
         { _id: 'Alter', count: 3 }
       ];
+      const mockStatusCounts = [
+        { _id: 'owned', count: 6 },
+        { _id: 'ordered', count: 2 }
+      ];
+      const mockV3ManufacturerStats = [{ _id: 'GSC', count: 5 }];
+      const mockDistributorStats = [{ _id: 'Native', count: 2 }];
 
       MockedFigure.countDocuments = jest.fn().mockResolvedValue(8);
       MockedFigure.aggregate = jest.fn()
-        .mockResolvedValueOnce(mockStatsResults) // manufacturer stats
-        .mockResolvedValueOnce([{ _id: '1/8', count: 6 }]) // scale stats
-        .mockResolvedValueOnce([{ _id: 'Shelf A', count: 4 }]); // location stats
+        .mockResolvedValueOnce(mockStatusCounts)      // statusCounts
+        .mockResolvedValueOnce(mockManufacturerStats) // manufacturerStats
+        .mockResolvedValueOnce([{ _id: '1/8', count: 6 }])   // scaleStats
+        .mockResolvedValueOnce([{ _id: 'Shelf A', count: 4 }]) // locationStats
+        .mockResolvedValueOnce([{ _id: 'Fate', count: 3 }])   // originStats
+        .mockResolvedValueOnce([{ _id: 'Scale', count: 5 }])  // categoryStats
+        .mockResolvedValueOnce(mockV3ManufacturerStats)       // v3ManufacturerStats
+        .mockResolvedValueOnce(mockDistributorStats);         // distributorStats
 
       await figureController.getFigureStats(mockRequest as Request, mockResponse as Response);
 
+      expect(mockResponse.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache, no-store, must-revalidate');
       expect(mockResponse.status).toHaveBeenCalledWith(200);
       expect(mockResponse.json).toHaveBeenCalledWith({
         success: true,
         data: {
           totalCount: 8,
-          manufacturerStats: mockStatsResults,
+          statusCounts: { owned: 6, ordered: 2, wished: 0 },
+          manufacturerStats: mockManufacturerStats,
+          v3ManufacturerStats: mockV3ManufacturerStats,
+          distributorStats: mockDistributorStats,
           scaleStats: [{ _id: '1/8', count: 6 }],
-          locationStats: [{ _id: 'Shelf A', count: 4 }]
+          locationStats: [{ _id: 'Shelf A', count: 4 }],
+          originStats: [{ _id: 'Fate', count: 3 }],
+          categoryStats: [{ _id: 'Scale', count: 5 }],
+          activeStatus: null
         }
       });
     });
@@ -722,7 +764,8 @@ describe('FigureController', () => {
     });
 
     it('should handle database errors during statistics calculation', async () => {
-      MockedFigure.countDocuments = jest.fn().mockRejectedValue(new Error('Database query failed'));
+      // The first aggregate call in getFigureStats is for statusCounts
+      MockedFigure.aggregate = jest.fn().mockRejectedValue(new Error('Database query failed'));
 
       await figureController.getFigureStats(mockRequest as Request, mockResponse as Response);
 
@@ -986,16 +1029,19 @@ describe('FigureController', () => {
 
       // Scraper should NOT be called when all fields are provided
       expect(mockedAxios.post).not.toHaveBeenCalled();
-      expect(MockedFigure.create).toHaveBeenCalledWith({
-        manufacturer: 'Good Smile Company',
-        name: 'Hatsune Miku',
-        scale: '1/8',
-        mfcLink: 'https://myfigurecollection.net/item/12345',
-        location: 'Shelf A',
-        boxNumber: 'Box 1',
-        imageUrl: 'https://example.com/image.jpg',
-        userId: '000000000000000000000123'
-      });
+      expect(MockedFigure.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          manufacturer: 'Good Smile Company',
+          name: 'Hatsune Miku',
+          scale: '1/8',
+          mfcLink: '12345', // Normalized to just ID
+          mfcId: 12345,     // Extracted from URL
+          location: 'Shelf A',
+          boxNumber: 'Box 1',
+          imageUrl: 'https://example.com/image.jpg',
+          userId: '000000000000000000000123'
+        })
+      );
       expect(mockResponse.status).toHaveBeenCalledWith(201);
     });
 
@@ -1076,7 +1122,7 @@ describe('FigureController', () => {
 
       // Verify mfcAuth was passed to the scraper
       expect(mockedAxios.post).toHaveBeenCalledWith(
-        'http://scraper-dev:3000/scrape/mfc',
+        'http://scraper-dev:3090/scrape/mfc',
         {
           url: 'https://myfigurecollection.net/item/12345',
           mfcAuth: 'PHPSESSID=abc123; sesUID=user456'
@@ -1157,7 +1203,7 @@ describe('FigureController', () => {
 
       // Verify mfcAuth was passed
       expect(mockedAxios.post).toHaveBeenCalledWith(
-        'http://scraper-dev:3000/scrape/mfc',
+        'http://scraper-dev:3090/scrape/mfc',
         {
           url: 'https://myfigurecollection.net/item/99999',
           mfcAuth: 'PHPSESSID=xyz789'
@@ -1363,6 +1409,1184 @@ describe('FigureController', () => {
         success: true,
         data: {}
       });
+    });
+  });
+
+  describe('SSRF Protection - scrapeDataFromMFCWithAxios', () => {
+    it('should reject non-MFC URL in local fallback scraper', async () => {
+      mockRequest.body = {
+        mfcLink: 'https://evil.example.com/item/12345'
+      };
+
+      await figureController.scrapeMFCData(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(400);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'URL must be from myfigurecollection.net'
+      });
+    });
+  });
+
+  describe('getFigures - validation branches', () => {
+    it('should return 401 when user is not authenticated', async () => {
+      mockRequest.user = undefined;
+
+      await figureController.getFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'User not authenticated'
+      });
+    });
+
+    it('should return 422 for invalid sortBy parameter', async () => {
+      mockRequest.query = { sortBy: 'invalid_field' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.getFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(422);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: 'Validation Error',
+          errors: expect.arrayContaining([
+            expect.stringContaining('sortBy must be one of')
+          ])
+        })
+      );
+    });
+
+    it('should return 422 for invalid sortOrder parameter', async () => {
+      mockRequest.query = { sortOrder: 'invalid' };
+
+      await figureController.getFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(422);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          errors: expect.arrayContaining([
+            'sortOrder must be either asc or desc'
+          ])
+        })
+      );
+    });
+
+    it('should return 422 for invalid status parameter', async () => {
+      mockRequest.query = { status: 'invalid_status' };
+
+      await figureController.getFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(422);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          errors: expect.arrayContaining([
+            expect.stringContaining('status must be one of')
+          ])
+        })
+      );
+    });
+
+    it('should return 422 when page is beyond available pages', async () => {
+      mockRequest.query = { page: '999' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(5); // 5 items, 1 page
+
+      await figureController.getFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(422);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          errors: ['Requested page is beyond available pages']
+        })
+      );
+    });
+
+    it('should filter by owned status including legacy null collectionStatus', async () => {
+      mockRequest.query = { status: 'owned' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.getFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          $or: [
+            { collectionStatus: 'owned' },
+            { collectionStatus: { $exists: false } },
+            { collectionStatus: null }
+          ]
+        })
+      );
+    });
+  });
+
+  describe('getFigureById - auth check', () => {
+    it('should return 401 when user is not authenticated', async () => {
+      mockRequest.user = undefined;
+      mockRequest.params = { id: 'fig123' };
+
+      await figureController.getFigureById(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
+    });
+
+    it('should return 500 on server error', async () => {
+      mockRequest.params = { id: 'fig123' };
+      MockedFigure.findOne = jest.fn().mockRejectedValue(new Error('DB error'));
+
+      await figureController.getFigureById(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  describe('createFigure - additional branches', () => {
+    it('should return 401 when user is not authenticated', async () => {
+      mockRequest.user = undefined;
+
+      await figureController.createFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
+    });
+
+    it('should derive manufacturer from companyRoles when not provided directly', async () => {
+      mockRequest.body = {
+        name: 'Test Figure',
+        companyRoles: [
+          { companyName: 'Derived Manufacturer', roleName: 'Manufacturer' }
+        ]
+      };
+
+      // Mock findOne for duplicate check to return null (no duplicate)
+      MockedFigure.findOne = jest.fn().mockResolvedValue(null);
+
+      const mockCreatedFigure = {
+        _id: 'fig123',
+        manufacturer: 'Derived Manufacturer',
+        name: 'Test Figure',
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.create = jest.fn().mockResolvedValue(mockCreatedFigure);
+
+      await figureController.createFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          manufacturer: 'Derived Manufacturer'
+        })
+      );
+    });
+
+    it('should derive manufacturer from first companyRole when no Manufacturer role', async () => {
+      mockRequest.body = {
+        name: 'Test Figure',
+        companyRoles: [
+          { companyName: 'First Company', roleName: 'Distributor' }
+        ]
+      };
+
+      // Mock findOne for duplicate check to return null (no duplicate)
+      MockedFigure.findOne = jest.fn().mockResolvedValue(null);
+
+      const mockCreatedFigure = {
+        _id: 'fig123',
+        manufacturer: 'First Company',
+        name: 'Test Figure',
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.create = jest.fn().mockResolvedValue(mockCreatedFigure);
+
+      await figureController.createFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          manufacturer: 'First Company'
+        })
+      );
+    });
+
+    it('should return 422 for invalid MFC link domain', async () => {
+      mockRequest.body = {
+        manufacturer: 'Test',
+        name: 'Test',
+        mfcLink: 'https://evil.com/item/123'
+      };
+
+      await figureController.createFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(422);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: expect.arrayContaining(['Invalid MFC link domain'])
+        })
+      );
+    });
+
+    it('should return 422 for invalid MFC link format', async () => {
+      mockRequest.body = {
+        manufacturer: 'Test',
+        name: 'Test',
+        mfcLink: 'not://valid url format'
+      };
+
+      await figureController.createFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(422);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: expect.arrayContaining(['Invalid MFC link format'])
+        })
+      );
+    });
+
+    it('should return 422 for invalid image URL format', async () => {
+      mockRequest.body = {
+        manufacturer: 'Test',
+        name: 'Test',
+        imageUrl: 'not-a-valid-url'
+      };
+
+      await figureController.createFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(422);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: expect.arrayContaining(['Invalid image URL format'])
+        })
+      );
+    });
+
+    it('should use releasesArray (Schema v3) when provided', async () => {
+      mockRequest.body = {
+        manufacturer: 'Test Mfr',
+        name: 'Test Figure',
+        releases: [
+          { date: '2024-01-01', price: 15000, currency: 'JPY', isRerelease: false, jan: '123' },
+          { date: '2024-06-01', price: 16000, currency: 'JPY', isRerelease: true }
+        ]
+      };
+
+      // Mock findOne for duplicate check
+      MockedFigure.findOne = jest.fn().mockResolvedValue(null);
+
+      const mockCreatedFigure = {
+        _id: 'fig123',
+        ...mockRequest.body,
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.create = jest.fn().mockResolvedValue(mockCreatedFigure);
+
+      await figureController.createFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          releases: expect.arrayContaining([
+            expect.objectContaining({
+              price: 15000,
+              currency: 'JPY',
+              isRerelease: false,
+              jan: '123'
+            })
+          ])
+        })
+      );
+    });
+
+    it('should build releases from legacy flat fields', async () => {
+      mockRequest.body = {
+        manufacturer: 'Test Mfr',
+        name: 'Test Figure',
+        releaseDate: '2024-03-15',
+        releasePrice: 12000,
+        releaseCurrency: 'JPY',
+        jan: '4580416940511'
+      };
+
+      // Mock findOne for duplicate check
+      MockedFigure.findOne = jest.fn().mockResolvedValue(null);
+
+      const mockCreatedFigure = {
+        _id: 'fig123',
+        ...mockRequest.body,
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.create = jest.fn().mockResolvedValue(mockCreatedFigure);
+
+      await figureController.createFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          releases: expect.arrayContaining([
+            expect.objectContaining({
+              price: 12000,
+              currency: 'JPY',
+              isRerelease: false,
+              jan: '4580416940511'
+            })
+          ])
+        })
+      );
+    });
+
+    it('should handle ValidationError from Mongoose', async () => {
+      mockRequest.body = {
+        manufacturer: 'Test',
+        name: 'Test'
+      };
+
+      // Mock findOne for duplicate check
+      MockedFigure.findOne = jest.fn().mockResolvedValue(null);
+
+      const validationError = new Error('Validation failed') as any;
+      validationError.name = 'ValidationError';
+      validationError.errors = {
+        scale: { message: 'Scale format is invalid' }
+      };
+
+      MockedFigure.create = jest.fn().mockRejectedValue(validationError);
+
+      await figureController.createFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(422);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: false,
+          message: 'Validation failed',
+          errors: ['Scale format is invalid']
+        })
+      );
+    });
+  });
+
+  describe('updateFigure - additional branches', () => {
+    it('should return 401 when user is not authenticated', async () => {
+      mockRequest.user = undefined;
+      mockRequest.params = { id: 'fig123' };
+
+      await figureController.updateFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
+    });
+
+    it('should derive manufacturer from companyRoles on update', async () => {
+      mockRequest.params = { id: 'fig123' };
+      mockRequest.body = {
+        name: 'Updated Name',
+        companyRoles: [
+          { companyName: 'Derived Mfr', roleName: 'Manufacturer' }
+        ]
+      };
+
+      const mockExistingFigure = {
+        _id: 'fig123',
+        manufacturer: 'Old Mfr',
+        name: 'Old Name',
+        mfcLink: '',
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.findOne = jest.fn().mockResolvedValue(mockExistingFigure);
+      MockedFigure.findByIdAndUpdate = jest.fn().mockResolvedValue({
+        ...mockExistingFigure,
+        manufacturer: 'Derived Mfr',
+        name: 'Updated Name'
+      });
+
+      await figureController.updateFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.findByIdAndUpdate).toHaveBeenCalledWith(
+        'fig123',
+        expect.objectContaining({
+          manufacturer: 'Derived Mfr'
+        }),
+        { new: true }
+      );
+    });
+
+    it('should keep existing image when no new image URL and no MFC link', async () => {
+      mockRequest.params = { id: 'fig123' };
+      mockRequest.body = {
+        manufacturer: 'Updated',
+        name: 'Updated'
+        // No imageUrl, no mfcLink
+      };
+
+      const mockExistingFigure = {
+        _id: 'fig123',
+        manufacturer: 'Old',
+        name: 'Old',
+        imageUrl: 'https://existing.com/image.jpg',
+        mfcLink: '',
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.findOne = jest.fn().mockResolvedValue(mockExistingFigure);
+      MockedFigure.findByIdAndUpdate = jest.fn().mockResolvedValue({
+        ...mockExistingFigure,
+        ...mockRequest.body
+      });
+
+      await figureController.updateFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.findByIdAndUpdate).toHaveBeenCalledWith(
+        'fig123',
+        expect.objectContaining({
+          imageUrl: 'https://existing.com/image.jpg'
+        }),
+        { new: true }
+      );
+    });
+
+    it('should update legacy releases from flat fields when releases exist', async () => {
+      mockRequest.params = { id: 'fig123' };
+      mockRequest.body = {
+        manufacturer: 'Test',
+        name: 'Test',
+        releaseDate: '2025-01-01',
+        releasePrice: 20000
+      };
+
+      const mockExistingFigure = {
+        _id: 'fig123',
+        manufacturer: 'Test',
+        name: 'Test',
+        mfcLink: '',
+        releases: [{ date: new Date('2024-01-01'), price: 15000, currency: 'JPY' }],
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.findOne = jest.fn().mockResolvedValue(mockExistingFigure);
+      MockedFigure.findByIdAndUpdate = jest.fn().mockResolvedValue({
+        ...mockExistingFigure,
+        ...mockRequest.body
+      });
+
+      await figureController.updateFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.findByIdAndUpdate).toHaveBeenCalledWith(
+        'fig123',
+        expect.objectContaining({
+          releases: expect.arrayContaining([
+            expect.objectContaining({
+              price: 20000
+            })
+          ])
+        }),
+        { new: true }
+      );
+    });
+
+    it('should add new legacy release when no existing releases', async () => {
+      mockRequest.params = { id: 'fig123' };
+      mockRequest.body = {
+        manufacturer: 'Test',
+        name: 'Test',
+        releasePrice: 18000,
+        releaseCurrency: 'USD'
+      };
+
+      const mockExistingFigure = {
+        _id: 'fig123',
+        manufacturer: 'Test',
+        name: 'Test',
+        mfcLink: '',
+        releases: [],
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.findOne = jest.fn().mockResolvedValue(mockExistingFigure);
+      MockedFigure.findByIdAndUpdate = jest.fn().mockResolvedValue({
+        ...mockExistingFigure,
+        ...mockRequest.body
+      });
+
+      await figureController.updateFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.findByIdAndUpdate).toHaveBeenCalledWith(
+        'fig123',
+        expect.objectContaining({
+          releases: expect.arrayContaining([
+            expect.objectContaining({
+              price: 18000,
+              currency: 'USD',
+              isRerelease: false
+            })
+          ])
+        }),
+        { new: true }
+      );
+    });
+
+    it('should fill in all empty fields from scraped data on update', async () => {
+      mockRequest.params = { id: 'fig123' };
+      mockRequest.body = {
+        // All fields empty - should be filled by scraper
+        manufacturer: '',
+        name: '',
+        scale: '',
+        imageUrl: '',
+        mfcLink: 'https://myfigurecollection.net/item/99999' // Different from existing
+      };
+
+      const mockExistingFigure = {
+        _id: 'fig123',
+        manufacturer: 'Existing Mfr',
+        name: 'Existing Name',
+        scale: '1/8',
+        imageUrl: 'https://existing.com/img.jpg',
+        mfcLink: '12345', // Different from new
+        userId: '000000000000000000000123'
+      };
+
+      const mockScrapedData = {
+        manufacturer: 'Scraped Manufacturer',
+        name: 'Scraped Name',
+        scale: '1/7',
+        imageUrl: 'https://scraped.com/image.jpg'
+      };
+
+      // Mock scraper service call
+      mockedAxios.post = jest.fn().mockResolvedValue({
+        data: {
+          success: true,
+          data: mockScrapedData
+        }
+      });
+
+      MockedFigure.findOne = jest.fn().mockResolvedValue(mockExistingFigure);
+      MockedFigure.findByIdAndUpdate = jest.fn().mockResolvedValue({
+        ...mockExistingFigure,
+        ...mockScrapedData
+      });
+
+      await figureController.updateFigure(mockRequest as Request, mockResponse as Response);
+
+      // Verify all scraped fields were used since all provided fields were empty
+      expect(MockedFigure.findByIdAndUpdate).toHaveBeenCalledWith(
+        'fig123',
+        expect.objectContaining({
+          imageUrl: 'https://scraped.com/image.jpg',
+          manufacturer: 'Scraped Manufacturer',
+          name: 'Scraped Name',
+          scale: '1/7'
+        }),
+        { new: true }
+      );
+    });
+
+    it('should use releasesArray on update (Schema v3)', async () => {
+      mockRequest.params = { id: 'fig123' };
+      mockRequest.body = {
+        manufacturer: 'Test',
+        name: 'Test',
+        releases: [
+          { date: '2025-01-01', price: 20000, currency: 'JPY', isRerelease: false, jan: '123' }
+        ]
+      };
+
+      const mockExistingFigure = {
+        _id: 'fig123',
+        manufacturer: 'Test',
+        name: 'Test',
+        mfcLink: '',
+        releases: [],
+        userId: '000000000000000000000123'
+      };
+
+      MockedFigure.findOne = jest.fn().mockResolvedValue(mockExistingFigure);
+      MockedFigure.findByIdAndUpdate = jest.fn().mockResolvedValue({
+        ...mockExistingFigure,
+        ...mockRequest.body
+      });
+
+      await figureController.updateFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.findByIdAndUpdate).toHaveBeenCalledWith(
+        'fig123',
+        expect.objectContaining({
+          releases: expect.arrayContaining([
+            expect.objectContaining({
+              price: 20000,
+              currency: 'JPY'
+            })
+          ])
+        }),
+        { new: true }
+      );
+    });
+
+    it('should return 500 on update server error', async () => {
+      mockRequest.params = { id: 'fig123' };
+      mockRequest.body = { manufacturer: 'Test', name: 'Test' };
+      MockedFigure.findOne = jest.fn().mockRejectedValue(new Error('DB Error'));
+
+      await figureController.updateFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  describe('deleteFigure - additional branches', () => {
+    it('should return 401 when user is not authenticated', async () => {
+      mockRequest.user = undefined;
+      mockRequest.params = { id: 'fig123' };
+
+      await figureController.deleteFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
+    });
+
+    it('should return 500 on delete server error', async () => {
+      mockRequest.params = { id: 'fig123' };
+      MockedFigure.findOne = jest.fn().mockRejectedValue(new Error('DB Error'));
+
+      await figureController.deleteFigure(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(500);
+    });
+  });
+
+  describe('searchFigures - additional branches', () => {
+    it('should return 401 when user is not authenticated', async () => {
+      mockRequest.user = undefined;
+      mockRequest.query = { query: 'test' };
+
+      await figureController.searchFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
+    });
+
+    it('should return 400 for invalid userId during search', async () => {
+      mockRequest.user = { id: 'INVALID_NOT_OBJECTID' };
+      mockRequest.query = { query: 'test' };
+
+      await figureController.searchFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(400);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Invalid user identifier'
+      });
+    });
+  });
+
+  describe('filterFigures - additional branches', () => {
+    it('should return 401 when user is not authenticated', async () => {
+      mockRequest.user = undefined;
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
+    });
+
+    it('should filter by status=owned with legacy null handling', async () => {
+      mockRequest.query = { status: 'owned' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          $or: [
+            { collectionStatus: 'owned' },
+            { collectionStatus: { $exists: false } },
+            { collectionStatus: null }
+          ]
+        })
+      );
+    });
+
+    it('should filter by status=ordered', async () => {
+      mockRequest.query = { status: 'ordered' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          collectionStatus: 'ordered'
+        })
+      );
+    });
+
+    it('should handle __unspecified__ scale filter', async () => {
+      mockRequest.query = { scale: '__unspecified__' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scale: { $in: [null, ''] }
+        })
+      );
+    });
+
+    it('should handle mixed __unspecified__ and specified scale values', async () => {
+      mockRequest.query = { scale: '__unspecified__,1/7' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scale: expect.objectContaining({
+            $in: expect.arrayContaining([null, ''])
+          })
+        })
+      );
+    });
+
+    it('should handle multiple scale values', async () => {
+      mockRequest.query = { scale: '1/7,1/8' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          scale: expect.objectContaining({ $in: expect.any(Array) })
+        })
+      );
+    });
+
+    it('should handle multiple location values', async () => {
+      mockRequest.query = { location: 'Shelf A,Shelf B' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          location: expect.objectContaining({ $in: expect.any(Array) })
+        })
+      );
+    });
+
+    it('should filter by origin with __unspecified__', async () => {
+      mockRequest.query = { origin: '__unspecified__' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          origin: { $in: [null, ''] }
+        })
+      );
+    });
+
+    it('should filter by origin with mixed __unspecified__ and specified values', async () => {
+      mockRequest.query = { origin: '__unspecified__,Vocaloid' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          origin: expect.objectContaining({
+            $in: expect.arrayContaining([null, ''])
+          })
+        })
+      );
+    });
+
+    it('should filter by multiple origin values', async () => {
+      mockRequest.query = { origin: 'Vocaloid,Fate' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          origin: expect.objectContaining({ $in: expect.any(Array) })
+        })
+      );
+    });
+
+    it('should filter by category with __unspecified__', async () => {
+      mockRequest.query = { category: '__unspecified__' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: { $in: [null, ''] }
+        })
+      );
+    });
+
+    it('should filter by category with mixed __unspecified__ and specified', async () => {
+      mockRequest.query = { category: '__unspecified__,Scale' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: expect.objectContaining({
+            $in: expect.arrayContaining([null, ''])
+          })
+        })
+      );
+    });
+
+    it('should filter by multiple category values', async () => {
+      mockRequest.query = { category: 'Scale,Trading' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: expect.objectContaining({ $in: expect.any(Array) })
+        })
+      );
+    });
+
+    it('should return 400 for invalid page parameter in filter', async () => {
+      mockRequest.query = { page: '-1' };
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(400);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: ['Page must be a positive integer']
+        })
+      );
+    });
+
+    it('should return 400 for invalid limit parameter in filter', async () => {
+      mockRequest.query = { limit: '200' };
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(400);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: ['Limit must be between 1 and 100']
+        })
+      );
+    });
+
+    it('should return 400 for invalid sortBy in filter', async () => {
+      mockRequest.query = { sortBy: 'invalid_field' };
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(400);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: [expect.stringContaining('sortBy must be one of')]
+        })
+      );
+    });
+
+    it('should return 400 for invalid sortOrder in filter', async () => {
+      mockRequest.query = { sortOrder: 'invalid' };
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(400);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: ['sortOrder must be either asc or desc']
+        })
+      );
+    });
+
+    it('should return 400 when page exceeds total pages in filter', async () => {
+      mockRequest.query = { page: '999' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(5);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(400);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errors: [expect.stringContaining('beyond the total')]
+        })
+      );
+    });
+
+    it('should return 500 on filter server error', async () => {
+      MockedFigure.countDocuments = jest.fn().mockRejectedValue(new Error('DB Error'));
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(500);
+    });
+
+    it('should filter by distributor', async () => {
+      mockRequest.query = { distributor: 'AmiAmi' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          $and: expect.arrayContaining([
+            expect.objectContaining({
+              companyRoles: expect.objectContaining({
+                $elemMatch: expect.objectContaining({
+                  roleName: 'Distributor',
+                  companyName: expect.any(RegExp)
+                })
+              })
+            })
+          ])
+        })
+      );
+    });
+
+    it('should filter by boxNumber', async () => {
+      mockRequest.query = { boxNumber: 'Box 1' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          boxNumber: { $regex: 'Box 1', $options: 'i' }
+        })
+      );
+    });
+
+    it('should filter with multiple manufacturers', async () => {
+      mockRequest.query = { manufacturer: 'GSC,Alter' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      // Verify $and with $or for manufacturer search
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          $and: expect.arrayContaining([
+            expect.objectContaining({
+              $or: expect.arrayContaining([
+                expect.objectContaining({ manufacturer: expect.objectContaining({ $in: expect.any(Array) }) }),
+                expect.objectContaining({
+                  companyRoles: expect.objectContaining({
+                    $elemMatch: expect.objectContaining({
+                      roleName: 'Manufacturer',
+                      companyName: expect.objectContaining({ $in: expect.any(Array) })
+                    })
+                  })
+                })
+              ])
+            })
+          ])
+        })
+      );
+    });
+  });
+
+  describe('getFigureStats - additional branches', () => {
+    it('should return 401 when user is not authenticated', async () => {
+      mockRequest.user = undefined;
+
+      await figureController.getFigureStats(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
+    });
+
+    it('should filter stats by owned status', async () => {
+      mockRequest.query = { status: 'owned' };
+
+      const mockStatusCounts = [{ _id: 'owned', count: 5 }];
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(5);
+      MockedFigure.aggregate = jest.fn()
+        .mockResolvedValueOnce(mockStatusCounts)  // statusCounts
+        .mockResolvedValueOnce([])  // manufacturerStats
+        .mockResolvedValueOnce([])  // scaleStats
+        .mockResolvedValueOnce([])  // locationStats
+        .mockResolvedValueOnce([])  // originStats
+        .mockResolvedValueOnce([])  // categoryStats
+        .mockResolvedValueOnce([])  // v3ManufacturerStats
+        .mockResolvedValueOnce([]); // distributorStats
+
+      await figureController.getFigureStats(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          data: expect.objectContaining({
+            activeStatus: 'owned'
+          })
+        })
+      );
+    });
+
+    it('should filter stats by non-owned status', async () => {
+      mockRequest.query = { status: 'ordered' };
+
+      const mockStatusCounts = [{ _id: 'ordered', count: 3 }];
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(3);
+      MockedFigure.aggregate = jest.fn()
+        .mockResolvedValueOnce(mockStatusCounts)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      await figureController.getFigureStats(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          data: expect.objectContaining({
+            activeStatus: 'ordered'
+          })
+        })
+      );
     });
   });
 });

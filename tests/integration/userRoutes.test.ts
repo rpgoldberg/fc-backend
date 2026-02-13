@@ -66,18 +66,21 @@ describe('User Routes Integration', () => {
       });
     });
 
-    it('should return 404 if user no longer exists', async () => {
+    it('should return 401 if user no longer exists (zero trust)', async () => {
       // Delete the user
       await User.findByIdAndDelete(testUser._id);
 
+      // Zero trust: auth middleware now validates user existence
+      // Returns 401 because JWT session is invalid when user doesn't exist
       const response = await request(app)
         .get('/users/profile')
         .set('Authorization', `Bearer ${authToken}`)
-        .expect(404);
+        .expect(401);
 
       expect(response.body).toEqual({
         success: false,
-        message: 'User not found'
+        message: 'User not found - session invalid',
+        code: 'USER_NOT_FOUND'
       });
     });
   });
@@ -179,7 +182,7 @@ describe('User Routes Integration', () => {
       });
     });
 
-    it('should return 404 if user no longer exists', async () => {
+    it('should return 401 if user no longer exists (zero trust)', async () => {
       // Delete the user
       await User.findByIdAndDelete(testUser._id);
 
@@ -187,15 +190,18 @@ describe('User Routes Integration', () => {
         username: 'newusername'
       };
 
+      // Zero trust: auth middleware now validates user existence
+      // Returns 401 because JWT session is invalid when user doesn't exist
       const response = await request(app)
         .put('/users/profile')
         .set('Authorization', `Bearer ${authToken}`)
         .send(updateData)
-        .expect(404);
+        .expect(401);
 
       expect(response.body).toEqual({
         success: false,
-        message: 'User not found'
+        message: 'User not found - session invalid',
+        code: 'USER_NOT_FOUND'
       });
     });
   });

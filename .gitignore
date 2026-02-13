@@ -69,3 +69,4 @@ test-validation-output.log
 *.backup
 *.bak
 *~
+logs/

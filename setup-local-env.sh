@@ -25,7 +25,7 @@ cat > .env << EOF
 NODE_ENV=development
 
 # Server
-PORT=5000
+PORT=5080
 
 # Database - Local MongoDB
 MONGODB_URI=mongodb://localhost:27017/figure-collector-dev
@@ -41,14 +41,14 @@ ACCESS_TOKEN_EXPIRY=15m
 # ROTATE_REFRESH_TOKENS=true
 
 # Services
-SCRAPER_SERVICE_URL=http://localhost:3000
+SCRAPER_SERVICE_URL=http://localhost:3080
 EOF
 
 echo "✅ .env file created with randomly generated secrets"
 echo ""
 echo "📝 Configuration summary:"
 echo "   Database: Local MongoDB (mongodb://localhost:27017/figure-collector-dev)"
-echo "   Port: 5000"
+echo "   Port: 5080"
 echo "   JWT secrets: Generated"
 echo ""
 echo "💡 To use MongoDB Atlas instead:"

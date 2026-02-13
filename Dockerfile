@@ -6,14 +6,19 @@
 # ============================================================================
 FROM node:25-alpine AS base
 
+# Cache-bust ARG to invalidate Docker layers when security patches are needed
+ARG CACHE_BUST=2026-02-12-npm-11.10-openssl-patches
+
 WORKDIR /app
 
-# Update repositories and upgrade OpenSSL for latest security patches (fixes CVE-2025-9230)
-# Upgrade npm to latest version to fix cross-spawn 7.0.3 vulnerability (GHSA-3xgq-45jj-v275)
+# Upgrade all Alpine packages for latest security patches (openssl, busybox, etc.)
+# Upgrade npm to latest version to fix bundled dependency vulnerabilities
+# (tar >=7.5.7, glob >=13.0.2, brace-expansion >=5.0.1)
 RUN apk update && \
-    apk upgrade --no-cache libssl3 libcrypto3 && \
+    apk upgrade --no-cache && \
     apk add --no-cache dumb-init && \
-    npm install -g npm@latest
+    npm install -g npm@latest && \
+    npm cache clean --force
 
 # Copy package files
 COPY package*.json ./
@@ -30,7 +35,7 @@ RUN npm ci
 COPY . .
 
 # Expose port
-EXPOSE 5000
+EXPOSE 5080
 
 # Use dumb-init and nodemon for development
 ENTRYPOINT ["dumb-init", "--"]
@@ -70,6 +75,9 @@ RUN npm run build
 # ============================================================================
 FROM node:25-alpine AS production
 
+# Cache-bust ARG for production stage security patches
+ARG CACHE_BUST=2026-02-12-npm-11.10-openssl-patches
+
 # Build arguments for customization
 ARG GITHUB_ORG=rpgoldberg
 ARG GITHUB_REPO=fc-backend
@@ -80,11 +88,12 @@ LABEL org.opencontainers.image.description="Backend API service for Figure Colle
 LABEL org.opencontainers.image.vendor="Figure Collector Services"
 LABEL org.opencontainers.image.source="https://github.com/${GITHUB_ORG}/${GITHUB_REPO}"
 
-# Update repositories and upgrade OpenSSL for latest security patches (fixes CVE-2025-9230)
-# Upgrade npm to latest version to fix cross-spawn 7.0.3 vulnerability (GHSA-3xgq-45jj-v275)
+# Upgrade all Alpine packages for latest security patches (openssl, busybox, etc.)
+# Upgrade npm to latest version to fix bundled dependency vulnerabilities
 RUN apk update && \
-    apk upgrade --no-cache libssl3 libcrypto3 && \
-    npm install -g npm@latest
+    apk upgrade --no-cache && \
+    npm install -g npm@latest && \
+    npm cache clean --force
 
 # Install dumb-init and create non-root user in a single layer
 RUN apk add --no-cache dumb-init && \
@@ -114,11 +123,11 @@ RUN mkdir -p /app/data /app/logs && \
 USER nodejs
 
 # Expose port
-EXPOSE 5000
+EXPOSE 5050
 
 # Health check using Node.js (not curl)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD node -e "const req = require('http').get('http://localhost:5000/health', { timeout: 5000 }, (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('timeout', () => { req.destroy(); process.exit(1); }); req.on('error', () => process.exit(1));"
+  CMD node -e "const req = require('http').get('http://localhost:5050/health', { timeout: 5000 }, (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('timeout', () => { req.destroy(); process.exit(1); }); req.on('error', () => process.exit(1));"
 
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]

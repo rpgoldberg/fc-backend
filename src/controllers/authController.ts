@@ -352,9 +352,12 @@ export const getProfile = async (req: Request, res: Response): Promise<Response 
     const user = await User.findById(req.user.id).select('-password');
 
     if (!user) {
-      return res.status(404).json({
+      // Return 401, not 404 - if the user doesn't exist, the JWT is invalid
+      // This happens when localStorage has a token from a different database instance
+      return res.status(401).json({
         success: false,
-        message: 'User not found'
+        message: 'User not found - session invalid',
+        code: 'USER_NOT_FOUND'
       });
     }
 

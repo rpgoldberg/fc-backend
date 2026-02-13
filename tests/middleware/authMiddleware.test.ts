@@ -20,6 +20,7 @@ describe('AuthMiddleware', () => {
   beforeEach(() => {
     mockRequest = {
       headers: {},
+      query: {},  // Required for SSE fallback token check
       user: undefined
     };
     mockResponse = {
@@ -45,13 +46,43 @@ describe('AuthMiddleware', () => {
       };
 
       mockedJwt.verify = jest.fn().mockReturnValue(mockDecodedToken);
+      // Zero Trust: Mock user exists check
+      MockedUser.exists = jest.fn().mockResolvedValue({ _id: 'user123' });
 
       await protect(mockRequest as Request, mockResponse as Response, mockNext);
 
       expect(mockedJwt.verify).toHaveBeenCalledWith('valid-token', process.env.JWT_SECRET);
+      expect(MockedUser.exists).toHaveBeenCalledWith({ _id: 'user123' });
       expect(mockRequest.user).toEqual({ id: 'user123' });
       expect(mockNext).toHaveBeenCalled();
       expect(mockResponse.status).not.toHaveBeenCalled();
+    });
+
+    it('should return 401 when user does not exist in database (zero trust)', async () => {
+      const mockDecodedToken = {
+        id: 'nonexistent-user',
+        exp: Math.floor(Date.now() / 1000) + 3600
+      };
+
+      mockRequest.headers = {
+        authorization: 'Bearer valid-token-but-user-deleted'
+      };
+
+      mockedJwt.verify = jest.fn().mockReturnValue(mockDecodedToken);
+      // Zero Trust: User does not exist
+      MockedUser.exists = jest.fn().mockResolvedValue(null);
+
+      await protect(mockRequest as Request, mockResponse as Response, mockNext);
+
+      expect(mockedJwt.verify).toHaveBeenCalledWith('valid-token-but-user-deleted', process.env.JWT_SECRET);
+      expect(MockedUser.exists).toHaveBeenCalledWith({ _id: 'nonexistent-user' });
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'User not found - session invalid',
+        code: 'USER_NOT_FOUND'
+      });
+      expect(mockNext).not.toHaveBeenCalled();
     });
 
     it('should pass through without automatic token refresh', async () => {
@@ -66,6 +97,7 @@ describe('AuthMiddleware', () => {
       };
 
       mockedJwt.verify = jest.fn().mockReturnValue(mockDecodedToken);
+      MockedUser.exists = jest.fn().mockResolvedValue({ _id: 'user123' });
 
       await protect(mockRequest as Request, mockResponse as Response, mockNext);
 
@@ -152,19 +184,13 @@ describe('AuthMiddleware', () => {
         authorization: 'Bearer '
       };
 
-      const invalidError = new Error('Invalid token') as any;
-      invalidError.name = 'JsonWebTokenError';
-      mockedJwt.verify = jest.fn().mockImplementation(() => {
-        throw invalidError;
-      });
-
+      // Note: jwt.verify is never called because empty token is caught first
       await protect(mockRequest as Request, mockResponse as Response, mockNext);
 
       expect(mockResponse.status).toHaveBeenCalledWith(401);
       expect(mockResponse.json).toHaveBeenCalledWith({
         success: false,
-        message: 'Invalid token',
-        code: 'INVALID_TOKEN'
+        message: 'Not authorized, no token'  // Empty token after "Bearer " triggers no-token path
       });
       expect(mockNext).not.toHaveBeenCalled();
     });
@@ -195,7 +221,7 @@ describe('AuthMiddleware', () => {
         const currentTime = Math.floor(Date.now() / 1000);
         const mockDecodedToken = {
           id: 'user123',
-          exp: currentTime + 600 // 10 minutes from now 
+          exp: currentTime + 600 // 10 minutes from now
         };
 
         mockRequest.headers = {
@@ -204,6 +230,7 @@ describe('AuthMiddleware', () => {
 
         mockedJwt.verify = jest.fn().mockReturnValue(mockDecodedToken);
         mockedJwt.sign = jest.fn();
+        MockedUser.exists = jest.fn().mockResolvedValue({ _id: 'user123' });
 
         await protect(mockRequest as Request, mockResponse as Response, mockNext);
 
@@ -225,6 +252,7 @@ describe('AuthMiddleware', () => {
         };
 
         mockedJwt.verify = jest.fn().mockReturnValue(mockDecodedToken);
+        MockedUser.exists = jest.fn().mockResolvedValue({ _id: 'user123' });
 
         await protect(mockRequest as Request, mockResponse as Response, mockNext);
 
@@ -339,6 +367,7 @@ describe('AuthMiddleware', () => {
 
       // First, protect middleware
       mockedJwt.verify = jest.fn().mockReturnValue(mockDecodedToken);
+      MockedUser.exists = jest.fn().mockResolvedValue({ _id: 'admin123' });
       await protect(mockRequest as Request, mockResponse as Response, mockNext);
 
       expect(mockRequest.user).toEqual({ id: 'admin123' });
@@ -347,12 +376,68 @@ describe('AuthMiddleware', () => {
       // Then, admin middleware
       MockedUser.findById = jest.fn().mockResolvedValue(mockAdminUser);
       (mockNext as jest.MockedFunction<any>).mockClear(); // Clear previous call
-      
+
       await admin(mockRequest as Request, mockResponse as Response, mockNext);
 
       expect(MockedUser.findById).toHaveBeenCalledWith('admin123');
       expect(mockNext).toHaveBeenCalledTimes(1);
       expect(mockResponse.status).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Query parameter token fallback (SSE)', () => {
+    it('should authenticate via query parameter token when no Authorization header present', async () => {
+      const mockDecodedToken = {
+        id: 'user123',
+        exp: Math.floor(Date.now() / 1000) + 3600
+      };
+
+      mockRequest.headers = {};  // No Authorization header
+      mockRequest.query = { token: 'valid-query-token' };
+
+      mockedJwt.verify = jest.fn().mockReturnValue(mockDecodedToken);
+      MockedUser.exists = jest.fn().mockResolvedValue({ _id: 'user123' });
+
+      await protect(mockRequest as Request, mockResponse as Response, mockNext);
+
+      expect(mockedJwt.verify).toHaveBeenCalledWith('valid-query-token', process.env.JWT_SECRET);
+      expect(MockedUser.exists).toHaveBeenCalledWith({ _id: 'user123' });
+      expect(mockRequest.user).toEqual({ id: 'user123' });
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockResponse.status).not.toHaveBeenCalled();
+    });
+
+    it('should prefer Authorization header over query parameter token', async () => {
+      const mockDecodedToken = {
+        id: 'user123',
+        exp: Math.floor(Date.now() / 1000) + 3600
+      };
+
+      mockRequest.headers = { authorization: 'Bearer header-token' };
+      mockRequest.query = { token: 'query-token' };
+
+      mockedJwt.verify = jest.fn().mockReturnValue(mockDecodedToken);
+      MockedUser.exists = jest.fn().mockResolvedValue({ _id: 'user123' });
+
+      await protect(mockRequest as Request, mockResponse as Response, mockNext);
+
+      // Should use the header token, not the query token
+      expect(mockedJwt.verify).toHaveBeenCalledWith('header-token', process.env.JWT_SECRET);
+      expect(mockNext).toHaveBeenCalled();
+    });
+
+    it('should return 401 when query token is not a string', async () => {
+      mockRequest.headers = {};
+      mockRequest.query = { token: ['array-token'] as any };
+
+      await protect(mockRequest as Request, mockResponse as Response, mockNext);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(401);
+      expect(mockResponse.json).toHaveBeenCalledWith({
+        success: false,
+        message: 'Not authorized, no token'
+      });
+      expect(mockNext).not.toHaveBeenCalled();
     });
   });
 
@@ -368,6 +453,7 @@ describe('AuthMiddleware', () => {
       };
 
       mockedJwt.verify = jest.fn().mockReturnValue(mockDecodedToken);
+      MockedUser.exists = jest.fn().mockResolvedValue({ _id: 'user123' });
 
       await protect(mockRequest as Request, mockResponse as Response, mockNext);
 
@@ -388,6 +474,7 @@ describe('AuthMiddleware', () => {
       };
 
       mockedJwt.verify = jest.fn().mockReturnValue(mockDecodedToken);
+      MockedUser.exists = jest.fn().mockResolvedValue({ _id: 'user123' });
 
       await protect(mockRequest as Request, mockResponse as Response, mockNext);
 
@@ -407,6 +494,7 @@ describe('AuthMiddleware', () => {
       };
 
       mockedJwt.verify = jest.fn().mockReturnValue(mockDecodedToken);
+      MockedUser.exists = jest.fn().mockResolvedValue({ _id: 'user123' });
 
       await protect(mockRequest as Request, mockResponse as Response, mockNext);
 
