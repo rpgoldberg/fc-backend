@@ -6,10 +6,14 @@
 # ============================================================================
 FROM node:25-alpine AS base
 
+# Cache-bust ARG to invalidate Docker layers when security patches are needed
+ARG CACHE_BUST=2026-02-12-npm-11.10-openssl-patches
+
 WORKDIR /app
 
 # Upgrade all Alpine packages for latest security patches (openssl, busybox, etc.)
 # Upgrade npm to latest version to fix bundled dependency vulnerabilities
+# (tar >=7.5.7, glob >=13.0.2, brace-expansion >=5.0.1)
 RUN apk update && \
     apk upgrade --no-cache && \
     apk add --no-cache dumb-init && \
@@ -70,6 +74,9 @@ RUN npm run build
 # Production Stage - Optimized runtime image
 # ============================================================================
 FROM node:25-alpine AS production
+
+# Cache-bust ARG for production stage security patches
+ARG CACHE_BUST=2026-02-12-npm-11.10-openssl-patches
 
 # Build arguments for customization
 ARG GITHUB_ORG=rpgoldberg
