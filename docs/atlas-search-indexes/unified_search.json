@@ -1,0 +1,48 @@
+{
+  "name": "unified_search",
+  "collectionName": "searchindexes",
+  "mappings": {
+    "dynamic": false,
+    "fields": {
+      "searchText": [
+        {
+          "type": "string",
+          "analyzer": "lucene.standard"
+        },
+        {
+          "type": "autocomplete",
+          "tokenization": "edgeGram",
+          "minGrams": 2,
+          "maxGrams": 15,
+          "foldDiacritics": true
+        }
+      ],
+      "nameSearchable": [
+        {
+          "type": "string",
+          "analyzer": "lucene.standard"
+        }
+      ],
+      "tags": [
+        {
+          "type": "string",
+          "analyzer": "lucene.keyword"
+        },
+        {
+          "type": "token",
+          "normalizer": "lowercase"
+        }
+      ],
+      "entityType": {
+        "type": "string",
+        "analyzer": "lucene.keyword"
+      },
+      "popularity": {
+        "type": "number"
+      },
+      "mfcId": {
+        "type": "number"
+      }
+    }
+  }
+}

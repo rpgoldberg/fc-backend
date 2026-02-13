@@ -9,11 +9,54 @@ import { figureSearch } from '../services/searchService';
 // Create secure logger instance for this controller
 const logger = createLogger('FIGURE');
 
+/**
+ * Extract MFC item ID from either a full URL or just an ID string.
+ * Returns the numeric ID or null if extraction fails.
+ */
+const extractMfcId = (mfcLink: string | undefined): number | null => {
+  if (!mfcLink) return null;
+
+  // If it's a URL, extract the ID from the path
+  const urlMatch = mfcLink.match(/myfigurecollection\.net\/item\/(\d+)/);
+  if (urlMatch) return parseInt(urlMatch[1], 10);
+
+  // If it's just digits, parse as number
+  const trimmed = mfcLink.trim();
+  if (/^\d+$/.test(trimmed)) return parseInt(trimmed, 10);
+
+  return null;
+};
+
+// Schema v3: Company and Artist entry types from scraper
+interface IScrapedCompanyEntry {
+  name: string;
+  role: string;  // "Manufacturer", "Distributor", etc.
+  mfcId?: number;
+}
+
+interface IScrapedArtistEntry {
+  name: string;
+  role: string;  // "Sculptor", "Illustrator", etc.
+  mfcId?: number;
+}
+
+interface IScrapedRelease {
+  date?: Date;
+  price?: number;
+  currency?: string;
+  isRerelease: boolean;
+  jan?: string;
+}
+
 interface MFCScrapedData {
   imageUrl?: string;
-  manufacturer?: string;
+  manufacturer?: string;  // Legacy: kept for backward compatibility
   name?: string;
   scale?: string;
+  // Schema v3: Company and Artist data with roles
+  companies?: IScrapedCompanyEntry[];
+  artists?: IScrapedArtistEntry[];
+  releases?: IScrapedRelease[];
 }
 
 // Axios-based MFC scraping function - local fallback when scraper service is unavailable
@@ -82,7 +125,9 @@ const scrapeDataFromMFCWithAxios = async (mfcLink: string): Promise<MFCScrapedDa
     logger.debug('Found .item-picture .main elements:', $('.item-picture .main').length);
     logger.debug('Found image elements in .item-picture .main:', imageElement.length);
     if (imageElement.length) {
-      scrapedData.imageUrl = imageElement.attr('src');
+      const rawUrl = imageElement.attr('src') || '';
+      // Upgrade to full-resolution: /upload/items/0/ or /1/ → /upload/items/2/
+      scrapedData.imageUrl = rawUrl.replace(/\/upload\/items\/[01]\//, '/upload/items/2/');
       logger.debug('Image URL found:', scrapedData.imageUrl);
     } else {
       logger.debug('No image element found');
@@ -152,7 +197,7 @@ const scrapeDataFromMFC = async (mfcLink: string, mfcAuth?: string): Promise<MFC
     logger.debug('Including MFC authentication cookies');
   }
 
-  const scraperServiceUrl = process.env.SCRAPER_SERVICE_URL || 'http://scraper-dev:3000'; // NOSONAR
+  const scraperServiceUrl = process.env.SCRAPER_SERVICE_URL || 'http://scraper-dev:3090'; // NOSONAR
 
   try {
     logger.debug('Calling scraper service at:', scraperServiceUrl);
@@ -286,6 +331,8 @@ export const scrapeMFCData = async (req: Request, res: Response) => {
 };
 
 // Get all figures for the logged-in user with pagination
+// Get all figures with optional status filter
+// Accepts optional ?status=owned|ordered|wished to filter by collection status
 export const getFigures = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -296,21 +343,41 @@ export const getFigures = async (req: Request, res: Response) => {
     }
     const userId = req.user.id;
     const validationErrors: string[] = [];
-    
+
     // Validate page parameter
     const pageParam = req.query.page as string;
     const page = parseInt(pageParam, 10);
     if (pageParam && (isNaN(page) || page <= 0)) {
       validationErrors.push('Page must be a positive integer');
     }
-    
+
     // Validate limit parameter
     const limitParam = req.query.limit as string;
     const limit = parseInt(limitParam, 10);
     if (limitParam && (isNaN(limit) || limit <= 0 || limit > 100)) {
       validationErrors.push('Limit must be between 1 and 100');
     }
-    
+
+    // Validate sortBy parameter
+    const sortByParam = req.query.sortBy as string;
+    const validSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
+    if (sortByParam && !validSortFields.includes(sortByParam)) {
+      validationErrors.push(`sortBy must be one of: ${validSortFields.join(', ')}`);
+    }
+
+    // Validate sortOrder parameter
+    const sortOrderParam = req.query.sortOrder as string;
+    if (sortOrderParam && !['asc', 'desc'].includes(sortOrderParam)) {
+      validationErrors.push('sortOrder must be either asc or desc');
+    }
+
+    // Validate status parameter (optional collection status filter)
+    const statusParam = req.query.status as string;
+    const validStatuses = ['owned', 'ordered', 'wished'];
+    if (statusParam && !validStatuses.includes(statusParam)) {
+      validationErrors.push(`status must be one of: ${validStatuses.join(', ')}`);
+    }
+
     // Return validation errors if any
     if (validationErrors.length > 0) {
       return res.status(422).json({
@@ -319,13 +386,30 @@ export const getFigures = async (req: Request, res: Response) => {
         errors: validationErrors
       });
     }
-    
+
     // Use default values if not specified
     const validPage = page || 1;
     const validLimit = limit || 10;
+    const validSortBy = sortByParam || 'createdAt';
+    const validSortOrder = sortOrderParam === 'asc' ? 1 : -1;
     const skip = (validPage - 1) * validLimit;
 
-    const total = await Figure.countDocuments({ userId });
+    // Build query filter with optional status
+    const query: Record<string, any> = { userId };
+    if (statusParam && validStatuses.includes(statusParam)) {
+      // Handle legacy figures: null/undefined collectionStatus treated as 'owned'
+      if (statusParam === 'owned') {
+        query.$or = [
+          { collectionStatus: 'owned' },
+          { collectionStatus: { $exists: false } },
+          { collectionStatus: null }
+        ];
+      } else {
+        query.collectionStatus = statusParam;
+      }
+    }
+
+    const total = await Figure.countDocuments(query);
     const pages = Math.ceil(total / validLimit);
 
     // Additional page validation
@@ -337,8 +421,13 @@ export const getFigures = async (req: Request, res: Response) => {
       });
     }
 
-    const figures = await Figure.find({ userId })
-      .sort({ createdAt: -1 })
+    // Build dynamic sort object - use allowlist guard for property injection safety
+    const allowedSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
+    const safeSortBy = allowedSortFields.includes(validSortBy) ? validSortBy : 'createdAt';
+    const sortOptions: Record<string, 1 | -1> = { [safeSortBy]: validSortOrder };
+
+    const figures = await Figure.find(query)
+      .sort(sortOptions)
       .skip(skip)
       .limit(validLimit);
 
@@ -396,7 +485,7 @@ export const getFigureById = async (req: Request, res: Response) => {
   }
 };
 
-// Updated createFigure with enhanced scraping
+// Updated createFigure with enhanced scraping and v3.0 fields
 export const createFigure = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -406,22 +495,63 @@ export const createFigure = async (req: Request, res: Response) => {
       });
     }
     const userId = req.user.id;
-    const { manufacturer, name, scale, mfcLink, mfcAuth, location, boxNumber, imageUrl } = req.body;
+
+    // Destructure all v3.0 fields from request body
+    const {
+      // Core fields
+      manufacturer, name, scale, mfcLink, mfcAuth, location, boxNumber, imageUrl,
+      // v3.0 fields
+      storageDetail, jan, mfcId,
+      // Schema v3: Array fields
+      companyRoles, artistRoles, releases: releasesArray,
+      // Schema v3: MFC-specific fields
+      mfcTitle, origin, version, category, classification, materials, tags,
+      // Release info (flat form fields - legacy)
+      releaseDate, releasePrice, releaseCurrency,
+      // Dimensions (flat form fields)
+      heightMm, widthMm, depthMm,
+      // Collection status
+      collectionStatus, rating, wishRating, quantity, note,
+      // Purchase info (flat form fields)
+      purchaseDate, purchasePrice, purchaseCurrency,
+      // Merchant info (flat form fields)
+      merchantName, merchantUrl,
+      // Condition
+      figureCondition, figureConditionNotes, boxCondition, boxConditionNotes,
+      // Legacy
+      type, description
+    } = req.body;
+
+    // Schema v3: Derive manufacturer from companyRoles if not provided directly
+    let resolvedManufacturer = manufacturer;
+    if (!resolvedManufacturer && companyRoles && Array.isArray(companyRoles) && companyRoles.length > 0) {
+      // Find the first company with 'Manufacturer' role, or just use first company
+      const manufacturerRole = companyRoles.find(
+        (cr: any) => cr.roleName?.toLowerCase() === 'manufacturer'
+      );
+      resolvedManufacturer = manufacturerRole?.companyName || companyRoles[0]?.companyName || '';
+    }
 
     // Basic validation is now handled by Joi middleware
     // Only need to validate URLs here since Joi doesn't have custom URL domain validation
     const validationErrors: string[] = [];
     
     if (mfcLink) {
-      try {
-        const parsedUrl = new URL(mfcLink);
-        const hostname = parsedUrl.hostname.toLowerCase();
-        if (hostname !== 'myfigurecollection.net' && hostname !== 'www.myfigurecollection.net') {
-          validationErrors.push('Invalid MFC link domain');
+      // Accept either a full MFC URL or just the numeric item ID
+      const numericIdPattern = /^\d+$/;
+      if (!numericIdPattern.test(mfcLink)) {
+        // Not a numeric ID, must be a valid MFC URL
+        try {
+          const parsedUrl = new URL(mfcLink);
+          const hostname = parsedUrl.hostname.toLowerCase();
+          if (hostname !== 'myfigurecollection.net' && hostname !== 'www.myfigurecollection.net') {
+            validationErrors.push('Invalid MFC link domain');
+          }
+        } catch {
+          validationErrors.push('Invalid MFC link format');
         }
-      } catch {
-        validationErrors.push('Invalid MFC link format');
       }
+      // If it's a numeric ID, it's valid - no further validation needed
     }
     
     if (imageUrl) {
@@ -442,10 +572,11 @@ export const createFigure = async (req: Request, res: Response) => {
     }
     
     // Check for duplicate figure for the user (only if we have manufacturer and name)
-    if (manufacturer && manufacturer.trim() && name && name.trim()) {
+    // Schema v3: Use resolvedManufacturer which can come from companyRoles[]
+    if (resolvedManufacturer && resolvedManufacturer.trim() && name && name.trim()) {
       const existingFigure = await Figure.findOne({
         userId,
-        manufacturer: manufacturer.trim(),
+        manufacturer: resolvedManufacturer.trim(),
         name: name.trim()
       });
       
@@ -458,8 +589,9 @@ export const createFigure = async (req: Request, res: Response) => {
     }
     
     // Start with provided data
+    // Schema v3: Use resolvedManufacturer which can come from companyRoles[]
     let finalData = {
-      manufacturer: manufacturer ? manufacturer.trim() : '',
+      manufacturer: resolvedManufacturer ? resolvedManufacturer.trim() : '',
       name: name ? name.trim() : '',
       scale: scale ? scale.trim() : '',
       imageUrl: imageUrl ? imageUrl.trim() : '',
@@ -508,15 +640,108 @@ export const createFigure = async (req: Request, res: Response) => {
       });
     }
     
+    // Build releases array - prefer Schema v3 releasesArray over legacy flat fields
+    let releases: any[] = [];
+    if (releasesArray && Array.isArray(releasesArray) && releasesArray.length > 0) {
+      // Schema v3: Use the structured releases array from frontend
+      releases = releasesArray.map((r: any) => ({
+        date: r.date ? new Date(r.date) : undefined,
+        price: r.price,
+        currency: r.currency || 'JPY',
+        isRerelease: r.isRerelease || false,
+        jan: r.jan
+      }));
+    } else if (releaseDate || releasePrice || releaseCurrency) {
+      // Legacy: Build from flat fields
+      releases.push({
+        date: releaseDate ? new Date(releaseDate) : undefined,
+        price: releasePrice,
+        currency: releaseCurrency || 'JPY',
+        isRerelease: false,
+        jan: jan
+      });
+    }
+
+    // Build dimensions object from flat form fields
+    const dimensions = (heightMm || widthMm || depthMm) ? {
+      heightMm,
+      widthMm,
+      depthMm
+    } : undefined;
+
+    // Build purchaseInfo object from flat form fields
+    const purchaseInfo = (purchaseDate || purchasePrice || purchaseCurrency) ? {
+      date: purchaseDate ? new Date(purchaseDate) : undefined,
+      price: purchasePrice,
+      currency: purchaseCurrency || 'USD'
+    } : undefined;
+
+    // Build merchant object from flat form fields
+    const merchant = (merchantName || merchantUrl) ? {
+      name: merchantName,
+      url: merchantUrl
+    } : undefined;
+
+    // Extract mfcId from mfcLink if not provided
+    const resolvedMfcId = mfcId ?? extractMfcId(mfcLink);
+    // Normalize mfcLink to just the ID for cleaner storage
+    const normalizedMfcLink = resolvedMfcId ? String(resolvedMfcId) : (mfcLink ? mfcLink.trim() : '');
+
     const figure = await Figure.create({
+      // Core identification
       manufacturer: finalData.manufacturer,
       name: finalData.name,
       scale: finalData.scale,
-      mfcLink: mfcLink ? mfcLink.trim() : '',
+      mfcLink: normalizedMfcLink,
+      mfcId: resolvedMfcId,
+      jan: jan,
+
+      // Schema v3: Company and Artist roles
+      companyRoles: companyRoles && companyRoles.length > 0 ? companyRoles : undefined,
+      artistRoles: artistRoles && artistRoles.length > 0 ? artistRoles : undefined,
+
+      // Schema v3: MFC-specific fields
+      mfcTitle: mfcTitle || undefined,
+      origin: origin || undefined,
+      version: version || undefined,
+      category: category || undefined,
+      classification: classification || undefined,
+      materials: materials || undefined,
+      tags: tags && tags.length > 0 ? tags : undefined,
+
+      // Storage
       location: finalData.location,
+      storageDetail: storageDetail || '',
       boxNumber: finalData.boxNumber,
+
+      // Media
       imageUrl: finalData.imageUrl,
-      userId
+
+      // Releases and dimensions
+      releases: releases.length > 0 ? releases : undefined,
+      dimensions: dimensions,
+
+      // User-specific data
+      userId,
+      collectionStatus: collectionStatus || 'owned',
+      quantity: quantity || 1,
+      rating: rating,
+      wishRating: wishRating,
+      note: note,
+
+      // Purchase info
+      purchaseInfo: purchaseInfo,
+      merchant: merchant,
+
+      // Condition - convert empty strings to undefined for Mongoose enum validation
+      figureCondition: figureCondition || undefined,
+      figureConditionNotes: figureConditionNotes,
+      boxCondition: boxCondition || undefined,
+      boxConditionNotes: boxConditionNotes,
+
+      // Legacy
+      type: type || 'action figure',
+      description: description
     });
     
     return res.status(201).json({
@@ -545,7 +770,7 @@ export const createFigure = async (req: Request, res: Response) => {
   }
 };
 
-// Update a figure
+// Update a figure with v3.0 fields
 export const updateFigure = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -555,7 +780,41 @@ export const updateFigure = async (req: Request, res: Response) => {
       });
     }
     const userId = req.user.id;
-    const { manufacturer, name, scale, mfcLink, mfcAuth, location, boxNumber, imageUrl } = req.body;
+
+    // Destructure all v3.0 fields from request body
+    const {
+      // Core fields
+      manufacturer, name, scale, mfcLink, mfcAuth, location, boxNumber, imageUrl,
+      // v3.0 fields
+      storageDetail, jan, mfcId,
+      // Schema v3: Array fields
+      companyRoles, artistRoles, releases: releasesArray,
+      // Schema v3: MFC-specific fields
+      mfcTitle, origin, version, category, classification, materials, tags,
+      // Release info (flat form fields - legacy)
+      releaseDate, releasePrice, releaseCurrency,
+      // Dimensions (flat form fields)
+      heightMm, widthMm, depthMm,
+      // Collection status
+      collectionStatus, rating, wishRating, quantity, note,
+      // Purchase info (flat form fields)
+      purchaseDate, purchasePrice, purchaseCurrency,
+      // Merchant info (flat form fields)
+      merchantName, merchantUrl,
+      // Condition
+      figureCondition, figureConditionNotes, boxCondition, boxConditionNotes,
+      // Legacy
+      type, description
+    } = req.body;
+
+    // Schema v3: Derive manufacturer from companyRoles if not provided directly
+    let resolvedManufacturer = manufacturer;
+    if (!resolvedManufacturer && companyRoles && Array.isArray(companyRoles) && companyRoles.length > 0) {
+      const manufacturerRole = companyRoles.find(
+        (cr: any) => cr.roleName?.toLowerCase() === 'manufacturer'
+      );
+      resolvedManufacturer = manufacturerRole?.companyName || companyRoles[0]?.companyName || '';
+    }
 
     // Find figure and check ownership
     let figure = await Figure.findOne({ // NOSONAR - Mongoose ODM (parameterized)
@@ -570,8 +829,9 @@ export const updateFigure = async (req: Request, res: Response) => {
       });
     }
 
+    // Schema v3: Use resolvedManufacturer which can come from companyRoles[]
     let finalData = {
-      manufacturer,
+      manufacturer: resolvedManufacturer,
       name,
       scale,
       imageUrl,
@@ -604,22 +864,125 @@ export const updateFigure = async (req: Request, res: Response) => {
       // Keep existing image if no new image URL and no MFC link
       finalData.imageUrl = figure.imageUrl;
     }
-    
-    // Update figure
+
+    // Build releases array - prefer Schema v3 releasesArray over legacy flat fields
+    let releases: any[] = figure.releases || [];
+    if (releasesArray && Array.isArray(releasesArray) && releasesArray.length > 0) {
+      // Schema v3: Use the structured releases array from frontend
+      releases = releasesArray.map((r: any) => ({
+        date: r.date ? new Date(r.date) : undefined,
+        price: r.price,
+        currency: r.currency || 'JPY',
+        isRerelease: r.isRerelease || false,
+        jan: r.jan
+      }));
+    } else if (releaseDate || releasePrice || releaseCurrency || jan) {
+      // Legacy: Update or add first release from flat fields
+      if (releases.length > 0) {
+        releases[0] = {
+          ...releases[0],
+          date: releaseDate ? new Date(releaseDate) : releases[0].date,
+          price: releasePrice !== undefined ? releasePrice : releases[0].price,
+          currency: releaseCurrency || releases[0].currency || 'JPY',
+          jan: jan || releases[0].jan
+        };
+      } else {
+        releases.push({
+          date: releaseDate ? new Date(releaseDate) : undefined,
+          price: releasePrice,
+          currency: releaseCurrency || 'JPY',
+          isRerelease: false,
+          jan: jan
+        });
+      }
+    }
+
+    // Build dimensions object from flat form fields
+    const dimensions = (heightMm !== undefined || widthMm !== undefined || depthMm !== undefined) ? {
+      heightMm: heightMm !== undefined ? heightMm : figure.dimensions?.heightMm,
+      widthMm: widthMm !== undefined ? widthMm : figure.dimensions?.widthMm,
+      depthMm: depthMm !== undefined ? depthMm : figure.dimensions?.depthMm
+    } : figure.dimensions;
+
+    // Build purchaseInfo object from flat form fields
+    const purchaseInfo = (purchaseDate !== undefined || purchasePrice !== undefined || purchaseCurrency !== undefined) ? {
+      date: purchaseDate ? new Date(purchaseDate) : figure.purchaseInfo?.date,
+      price: purchasePrice !== undefined ? purchasePrice : figure.purchaseInfo?.price,
+      currency: purchaseCurrency || figure.purchaseInfo?.currency || 'USD'
+    } : figure.purchaseInfo;
+
+    // Build merchant object from flat form fields
+    const merchant = (merchantName !== undefined || merchantUrl !== undefined) ? {
+      name: merchantName !== undefined ? merchantName : figure.merchant?.name,
+      url: merchantUrl !== undefined ? merchantUrl : figure.merchant?.url
+    } : figure.merchant;
+
+    // Extract mfcId from mfcLink if not provided, otherwise use existing
+    const resolvedMfcId = mfcId ?? extractMfcId(mfcLink) ?? figure.mfcId;
+    // Normalize mfcLink to just the ID for cleaner storage
+    const normalizedMfcLink = resolvedMfcId ? String(resolvedMfcId) : (mfcLink ? mfcLink.trim() : figure.mfcLink || '');
+
+    // Update figure with all v3.0 fields
     figure = await Figure.findByIdAndUpdate(
       req.params.id,
       {
-	manufacturer: finalData.manufacturer,
+        // Core identification
+        manufacturer: finalData.manufacturer,
         name: finalData.name,
         scale: finalData.scale,
-        mfcLink: mfcLink || '', // Allow empty string
+        mfcLink: normalizedMfcLink,
+        mfcId: resolvedMfcId,
+        jan: jan !== undefined ? jan : figure.jan,
+
+        // Schema v3: Company and Artist roles
+        companyRoles: companyRoles !== undefined ? (companyRoles && companyRoles.length > 0 ? companyRoles : undefined) : figure.companyRoles,
+        artistRoles: artistRoles !== undefined ? (artistRoles && artistRoles.length > 0 ? artistRoles : undefined) : figure.artistRoles,
+
+        // Schema v3: MFC-specific fields
+        mfcTitle: mfcTitle !== undefined ? (mfcTitle || undefined) : figure.mfcTitle,
+        origin: origin !== undefined ? (origin || undefined) : figure.origin,
+        version: version !== undefined ? (version || undefined) : figure.version,
+        category: category !== undefined ? (category || undefined) : figure.category,
+        classification: classification !== undefined ? (classification || undefined) : figure.classification,
+        materials: materials !== undefined ? (materials || undefined) : figure.materials,
+        tags: tags !== undefined ? (tags && tags.length > 0 ? tags : undefined) : figure.tags,
+
+        // Storage
         location: finalData.location,
+        storageDetail: storageDetail !== undefined ? storageDetail : figure.storageDetail,
         boxNumber: finalData.boxNumber,
-        imageUrl: finalData.imageUrl
+
+        // Media
+        imageUrl: finalData.imageUrl,
+
+        // Releases and dimensions
+        releases: releases,
+        dimensions: dimensions,
+
+        // User-specific data
+        collectionStatus: collectionStatus !== undefined ? collectionStatus : figure.collectionStatus,
+        quantity: quantity !== undefined ? quantity : figure.quantity,
+        rating: rating !== undefined ? rating : figure.rating,
+        wishRating: wishRating !== undefined ? wishRating : figure.wishRating,
+        note: note !== undefined ? note : figure.note,
+
+        // Purchase info
+        purchaseInfo: purchaseInfo,
+        merchant: merchant,
+
+        // Condition - convert empty strings to undefined for Mongoose enum validation
+        figureCondition: figureCondition !== undefined ? (figureCondition || undefined) : figure.figureCondition,
+        figureConditionNotes: figureConditionNotes !== undefined ? figureConditionNotes : figure.figureConditionNotes,
+        boxCondition: boxCondition !== undefined ? (boxCondition || undefined) : figure.boxCondition,
+        boxConditionNotes: boxConditionNotes !== undefined ? boxConditionNotes : figure.boxConditionNotes,
+
+        // Legacy
+        type: type !== undefined ? type : figure.type,
+        description: description !== undefined ? description : figure.description
       },
       { new: true }
     );
-    
+
     return res.status(200).json({
       success: true,
       data: figure
@@ -745,15 +1108,138 @@ export const filterFigures = async (req: Request, res: Response) => {
       });
     }
     const userId = req.user.id;
-    const { manufacturer, scale, location, boxNumber } = req.query;
-    
+    const { manufacturer, scale, location, boxNumber, status, origin, category, distributor } = req.query;
+
     const query: any = { userId };
-    
-    if (manufacturer) query.manufacturer = { $regex: manufacturer as string, $options: 'i' };
-    if (scale) query.scale = { $regex: scale as string, $options: 'i' };
-    if (location) query.location = { $regex: location as string, $options: 'i' };
+
+    // Collection status filter (owned/ordered/wished)
+    // Handle legacy figures: null/undefined collectionStatus treated as 'owned'
+    const validStatuses = ['owned', 'ordered', 'wished'];
+    if (status && validStatuses.includes(status as string)) {
+      if (status === 'owned') {
+        query.$or = [
+          { collectionStatus: 'owned' },
+          { collectionStatus: { $exists: false } },
+          { collectionStatus: null }
+        ];
+      } else {
+        query.collectionStatus = status;
+      }
+    }
+
+    // Escape regex special characters in filter values (e.g., "1/7" contains "/")
+    const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
+
+    // Support comma-separated values for multi-select faceted filtering
+    // e.g., manufacturer=Good+Smile+Company,Alter → matches either manufacturer
+    // Search BOTH legacy manufacturer field AND companyRoles with Manufacturer role
+    if (manufacturer) {
+      const values = (manufacturer as string).split(',').map(v => v.trim()).filter(Boolean);
+      const manufacturerPatterns = values.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'));
+
+      // Match either legacy manufacturer OR companyRoles with Manufacturer role
+      query.$and = query.$and || [];
+      query.$and.push({
+        $or: [
+          // Legacy manufacturer field
+          { manufacturer: values.length > 1 ? { $in: manufacturerPatterns } : manufacturerPatterns[0] },
+          // v3 companyRoles with Manufacturer role
+          {
+            companyRoles: {
+              $elemMatch: {
+                roleName: 'Manufacturer',
+                companyName: values.length > 1 ? { $in: manufacturerPatterns } : manufacturerPatterns[0]
+              }
+            }
+          }
+        ]
+      });
+    }
+
+    // Filter by distributor (Schema v3 companyRoles with Distributor role)
+    if (distributor) {
+      const values = (distributor as string).split(',').map(v => v.trim()).filter(Boolean);
+      const distributorPatterns = values.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'));
+
+      query.$and = query.$and || [];
+      query.$and.push({
+        companyRoles: {
+          $elemMatch: {
+            roleName: 'Distributor',
+            companyName: values.length > 1 ? { $in: distributorPatterns } : distributorPatterns[0]
+          }
+        }
+      });
+    }
+    if (scale) {
+      const values = (scale as string).split(',').map(v => v.trim()).filter(Boolean);
+      // Handle special "__unspecified__" value for null/empty scales
+      const hasUnspecified = values.includes('__unspecified__');
+      const specifiedValues = values.filter(v => v !== '__unspecified__');
+
+      if (hasUnspecified && specifiedValues.length > 0) {
+        // Mix of unspecified and specified values: use $or
+        query.scale = {
+          $in: [
+            null,
+            '',
+            ...specifiedValues.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'))
+          ]
+        };
+      } else if (hasUnspecified) {
+        // Only unspecified: match null or empty string
+        query.scale = { $in: [null, ''] };
+      } else {
+        // Only specified values
+        query.scale = specifiedValues.length > 1
+          ? { $in: specifiedValues.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i')) }
+          : { $regex: `^${escapeRegex(specifiedValues[0])}$`, $options: 'i' };
+      }
+    }
+    if (location) {
+      const values = (location as string).split(',').map(v => v.trim()).filter(Boolean);
+      query.location = values.length > 1
+        ? { $in: values.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i')) }
+        : { $regex: values[0], $options: 'i' };
+    }
     if (boxNumber) query.boxNumber = { $regex: boxNumber as string, $options: 'i' };
-    
+    if (origin) {
+      const values = (origin as string).split(',').map(v => v.trim()).filter(Boolean);
+      // Handle special "__unspecified__" value for null/empty origins
+      const hasUnspecified = values.includes('__unspecified__');
+      const specifiedValues = values.filter(v => v !== '__unspecified__');
+
+      if (hasUnspecified && specifiedValues.length > 0) {
+        query.origin = {
+          $in: [null, '', ...specifiedValues.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'))]
+        };
+      } else if (hasUnspecified) {
+        query.origin = { $in: [null, ''] };
+      } else {
+        query.origin = specifiedValues.length > 1
+          ? { $in: specifiedValues.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i')) }
+          : { $regex: `^${escapeRegex(specifiedValues[0])}$`, $options: 'i' };
+      }
+    }
+    if (category) {
+      const values = (category as string).split(',').map(v => v.trim()).filter(Boolean);
+      // Handle special "__unspecified__" value for null/empty categories
+      const hasUnspecified = values.includes('__unspecified__');
+      const specifiedValues = values.filter(v => v !== '__unspecified__');
+
+      if (hasUnspecified && specifiedValues.length > 0) {
+        query.category = {
+          $in: [null, '', ...specifiedValues.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'))]
+        };
+      } else if (hasUnspecified) {
+        query.category = { $in: [null, ''] };
+      } else {
+        query.category = specifiedValues.length > 1
+          ? { $in: specifiedValues.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i')) }
+          : { $regex: `^${escapeRegex(specifiedValues[0])}$`, $options: 'i' };
+      }
+    }
+
     const pageParam = req.query.page as string;
     const page = parseInt(pageParam, 10);
     if (pageParam && (isNaN(page) || page <= 0)) {
@@ -773,11 +1259,34 @@ export const filterFigures = async (req: Request, res: Response) => {
         errors: ['Limit must be between 1 and 100']
       });
     }
-    
+
+    // Validate sortBy parameter
+    const sortByParam = req.query.sortBy as string;
+    const validSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
+    if (sortByParam && !validSortFields.includes(sortByParam)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sort validation failed',
+        errors: [`sortBy must be one of: ${validSortFields.join(', ')}`]
+      });
+    }
+
+    // Validate sortOrder parameter
+    const sortOrderParam = req.query.sortOrder as string;
+    if (sortOrderParam && !['asc', 'desc'].includes(sortOrderParam)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sort validation failed',
+        errors: ['sortOrder must be either asc or desc']
+      });
+    }
+
     const validPage = page || 1;
     const validLimit = limit || 10;
+    const validSortBy = sortByParam || 'createdAt';
+    const validSortOrder = sortOrderParam === 'asc' ? 1 : -1;
     const skip = (validPage - 1) * validLimit;
-    
+
     const total = await Figure.countDocuments(query);
     const pages = Math.ceil(total / validLimit);
 
@@ -789,12 +1298,17 @@ export const filterFigures = async (req: Request, res: Response) => {
         errors: [`Requested page ${validPage} is beyond the total of ${pages} pages`]
       });
     }
-    
+
+    // Build dynamic sort object - use allowlist guard for property injection safety
+    const allowedSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
+    const safeSortBy = allowedSortFields.includes(validSortBy) ? validSortBy : 'createdAt';
+    const sortOptions: Record<string, 1 | -1> = { [safeSortBy]: validSortOrder };
+
     const figures = await Figure.find(query)
-      .sort({ createdAt: -1 })
+      .sort(sortOptions)
       .skip(skip)
       .limit(validLimit);
-    
+
     return res.status(200).json({
       success: true,
       count: figures.length,
@@ -813,6 +1327,7 @@ export const filterFigures = async (req: Request, res: Response) => {
 };
 
 // Get statistics
+// Accepts optional ?status=owned|ordered|wished to filter stats by collection status
 export const getFigureStats = async (req: Request, res: Response) => {
   try {
     if (!req.user) {
@@ -823,7 +1338,7 @@ export const getFigureStats = async (req: Request, res: Response) => {
     }
     const userId = req.user.id;
     let userObjectId: mongoose.Types.ObjectId;
-    
+
     try {
       userObjectId = new mongoose.Types.ObjectId(userId);
     } catch (error: any) {
@@ -833,38 +1348,136 @@ export const getFigureStats = async (req: Request, res: Response) => {
         message: 'Invalid user identifier'
       });
     }
-    
-    // Total count
-    const totalCount = await Figure.countDocuments({ userId: userObjectId });
-    
-    // Count by manufacturer
-    const manufacturerStats = await Figure.aggregate([
+
+    // Optional collection status filter
+    const statusFilter = req.query.status as string | undefined;
+    const validStatuses = ['owned', 'ordered', 'wished'];
+    const collectionStatus = statusFilter && validStatuses.includes(statusFilter) ? statusFilter : undefined;
+
+    // Base match filter - always filter by user
+    // Handle legacy figures: null/undefined collectionStatus treated as 'owned'
+    const baseMatch: Record<string, any> = { userId: userObjectId };
+    if (collectionStatus) {
+      if (collectionStatus === 'owned') {
+        baseMatch.$or = [
+          { collectionStatus: 'owned' },
+          { collectionStatus: { $exists: false } },
+          { collectionStatus: null }
+        ];
+      } else {
+        baseMatch.collectionStatus = collectionStatus;
+      }
+    }
+
+    // Status counts (always return all three, unfiltered by status param)
+    // Legacy figures with null/undefined collectionStatus are counted as 'owned'
+    const statusCounts = await Figure.aggregate([
       { $match: { userId: userObjectId } },
+      {
+        $group: {
+          _id: {
+            $ifNull: ['$collectionStatus', 'owned']
+          },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+    const statusCountsMap = {
+      owned: 0,
+      ordered: 0,
+      wished: 0
+    };
+    statusCounts.forEach((s: { _id: string; count: number }) => {
+      if (s._id && validStatuses.includes(s._id)) {
+        statusCountsMap[s._id as keyof typeof statusCountsMap] = s.count;
+      }
+    });
+
+    // Total count (filtered by status if provided)
+    const totalCount = await Figure.countDocuments(baseMatch);
+
+    // Count by manufacturer (filtered)
+    const manufacturerStats = await Figure.aggregate([
+      { $match: baseMatch },
       { $group: { _id: '$manufacturer', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ]);
-    
-    // Count by scale
+
+    // Count by scale (filtered)
     const scaleStats = await Figure.aggregate([
-      { $match: { userId: userObjectId } },
+      { $match: baseMatch },
       { $group: { _id: '$scale', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ]);
-    
-    // Count by location
+
+    // Count by location (filtered)
     const locationStats = await Figure.aggregate([
-      { $match: { userId: userObjectId } },
+      { $match: baseMatch },
       { $group: { _id: '$location', count: { $sum: 1 } } },
       { $sort: { count: -1 } }
     ]);
-    
+
+    // Count by origin/franchise (filtered) - Schema v3
+    const originStats = await Figure.aggregate([
+      { $match: baseMatch },
+      { $group: { _id: '$origin', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]);
+
+    // Count by category/type (filtered) - Schema v3
+    const categoryStats = await Figure.aggregate([
+      { $match: baseMatch },
+      { $group: { _id: '$category', count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]);
+
+    // Schema v3: Count manufacturers from companyRoles (filtered)
+    // This groups by companyName where roleName is 'Manufacturer'
+    const v3ManufacturerStats = await Figure.aggregate([
+      { $match: baseMatch },
+      { $unwind: { path: '$companyRoles', preserveNullAndEmptyArrays: false } },
+      { $match: { 'companyRoles.roleName': 'Manufacturer' } },
+      {
+        $group: {
+          _id: '$companyRoles.companyName',
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { count: -1 } }
+    ]);
+
+    // Schema v3: Count distributors from companyRoles (filtered)
+    const distributorStats = await Figure.aggregate([
+      { $match: baseMatch },
+      { $unwind: { path: '$companyRoles', preserveNullAndEmptyArrays: false } },
+      { $match: { 'companyRoles.roleName': 'Distributor' } },
+      {
+        $group: {
+          _id: '$companyRoles.companyName',
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { count: -1 } }
+    ]);
+
+    // Prevent caching of stats - always fetch fresh data
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
     return res.status(200).json({
       success: true,
       data: {
         totalCount,
+        statusCounts: statusCountsMap,
         manufacturerStats,
+        v3ManufacturerStats,
+        distributorStats,
         scaleStats,
-        locationStats
+        locationStats,
+        originStats,
+        categoryStats,
+        activeStatus: collectionStatus || null
       }
     });
   } catch (error: any) {

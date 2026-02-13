@@ -35,15 +35,36 @@ describe('Figure Model', () => {
       expect(savedFigure.updatedAt).toBeDefined();
     });
 
-    it('should require manufacturer field', async () => {
+    it('should allow figure without manufacturer (Schema v3)', async () => {
+      // Schema v3: manufacturer is optional when companyRoles is used
       const figureData = {
         name: 'Test Figure',
         userId: testUserId
       };
 
       const figure = new Figure(figureData);
-      
-      await expect(figure.save()).rejects.toThrow();
+      const savedFigure = await figure.save();
+
+      // Should save without manufacturer
+      expect(savedFigure._id).toBeDefined();
+      expect(savedFigure.name).toBe('Test Figure');
+    });
+
+    it('should derive manufacturer from companyRoles on save (Schema v3)', async () => {
+      const figureData = {
+        name: 'Test Figure',
+        userId: testUserId,
+        companyRoles: [
+          { companyName: 'Good Smile Company', roleName: 'Manufacturer' },
+          { companyName: 'Max Factory', roleName: 'Distributor' }
+        ]
+      };
+
+      const figure = new Figure(figureData);
+      const savedFigure = await figure.save();
+
+      // Should derive manufacturer from first role with 'Manufacturer' roleName
+      expect(savedFigure.manufacturer).toBe('Good Smile Company');
     });
 
     it('should require name field', async () => {

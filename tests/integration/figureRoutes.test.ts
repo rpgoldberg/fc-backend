@@ -369,7 +369,8 @@ describe('Figure Routes Integration', () => {
       expect(response.body.data.name).toBe('Hatsune Miku');
       expect(response.body.data.scale).toBe('1/8');
       expect(response.body.data.imageUrl).toBe('https://example.com/image.jpg');
-      expect(response.body.data.mfcLink).toBe('https://myfigurecollection.net/item/12345');
+      // Note: mfcLink is normalized to just the ID for cleaner storage (see figureController line 634)
+      expect(response.body.data.mfcLink).toBe('12345');
     });
 
     it('should return 401 without authentication', async () => {
@@ -409,7 +410,7 @@ describe('Figure Routes Integration', () => {
           },
           expectedStatus: 422,
           expectedMessage: /Validation Error/i,
-          expectedErrors: ['length must be less than or equal to 100 characters']
+          expectedErrors: ['length must be less than or equal to 100 characters'] // manufacturer is still 100
         },
         {
           description: 'Invalid name length',
@@ -419,7 +420,7 @@ describe('Figure Routes Integration', () => {
           },
           expectedStatus: 422,
           expectedMessage: /Validation Error/i,
-          expectedErrors: ['length must be less than or equal to 100 characters']
+          expectedErrors: ['length must be less than or equal to 200 characters'] // name is now 200 in v3.0 schema
         },
         {
           description: 'Invalid scale length',
@@ -955,6 +956,114 @@ describe('Figure Routes Integration', () => {
         expect(response.body.data).toHaveLength(0);
       }
     });
+
+    it('should filter figures by distributor from Schema v3 companyRoles', async () => {
+      // Create figures with Schema v3 companyRoles containing Distributor role
+      await Figure.insertMany([
+        {
+          name: 'Nendoroid Miku',
+          manufacturer: 'Good Smile Company',
+          companyRoles: [
+            { companyName: 'Good Smile Company', roleName: 'Manufacturer' },
+            { companyName: 'Native', roleName: 'Distributor' }
+          ],
+          userId: testUser._id
+        },
+        {
+          name: 'Scale Figure Rem',
+          manufacturer: 'Kadokawa',
+          companyRoles: [
+            { companyName: 'Kadokawa', roleName: 'Manufacturer' },
+            { companyName: 'Native', roleName: 'Distributor' }
+          ],
+          userId: testUser._id
+        },
+        {
+          name: 'Figma Link',
+          manufacturer: 'Max Factory',
+          companyRoles: [
+            { companyName: 'Max Factory', roleName: 'Manufacturer' },
+            { companyName: 'AmiAmi', roleName: 'Distributor' }
+          ],
+          userId: testUser._id
+        }
+      ]);
+
+      // Filter by distributor should return only figures with that distributor role
+      const response = await request(app)
+        .get('/figures/filter?distributor=Native')
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.total).toBe(2);
+      expect(response.body.data.every((fig: any) =>
+        fig.companyRoles?.some((cr: any) =>
+          cr.roleName === 'Distributor' && cr.companyName === 'Native'
+        )
+      )).toBe(true);
+    });
+
+    it('should combine distributor filter with manufacturer filter', async () => {
+      // Create figures with various company roles
+      await Figure.insertMany([
+        {
+          name: 'Nendoroid Aqua',
+          companyRoles: [
+            { companyName: 'Good Smile Company', roleName: 'Manufacturer' },
+            { companyName: 'Native', roleName: 'Distributor' }
+          ],
+          userId: testUser._id
+        },
+        {
+          name: 'Figma Kazuma',
+          companyRoles: [
+            { companyName: 'Max Factory', roleName: 'Manufacturer' },
+            { companyName: 'Native', roleName: 'Distributor' }
+          ],
+          userId: testUser._id
+        },
+        {
+          name: 'Scale Figure Darkness',
+          companyRoles: [
+            { companyName: 'Good Smile Company', roleName: 'Manufacturer' },
+            { companyName: 'AmiAmi', roleName: 'Distributor' }
+          ],
+          userId: testUser._id
+        }
+      ]);
+
+      // Filter by both manufacturer and distributor
+      const response = await request(app)
+        .get('/figures/filter?manufacturer=Good Smile Company&distributor=Native')
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.total).toBe(1);
+      expect(response.body.data[0].name).toBe('Nendoroid Aqua');
+    });
+
+    it('should return no results when filtering by non-existent distributor', async () => {
+      // Add a figure with companyRoles for completeness
+      await Figure.create({
+        name: 'Test Figure',
+        companyRoles: [
+          { companyName: 'Good Smile Company', roleName: 'Manufacturer' },
+          { companyName: 'Native', roleName: 'Distributor' }
+        ],
+        userId: testUser._id
+      });
+
+      const response = await request(app)
+        .get('/figures/filter?distributor=Non-Existent Distributor')
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.total).toBe(0);
+      expect(response.body.data).toHaveLength(0);
+    });
   });
 
   describe('GET /figures/stats', () => {
@@ -1021,6 +1130,135 @@ describe('Figure Routes Integration', () => {
         success: false,
         message: 'Not authorized, no token'
       });
+    });
+  });
+
+  describe('GET /figures/stats - Schema v3 Company Stats', () => {
+    beforeEach(async () => {
+      // Create figures with v3 companyRoles
+      // Note: manufacturer is still required but companyRoles provides richer data
+      const figuresWithCompanyRoles = [
+        {
+          name: 'V3 Figure 1',
+          manufacturer: 'Good Smile Company', // Derived from companyRoles
+          userId: testUser._id,
+          companyRoles: [
+            { companyName: 'Good Smile Company', roleName: 'Manufacturer' }
+          ]
+        },
+        {
+          name: 'V3 Figure 2',
+          manufacturer: 'Good Smile Company', // First Manufacturer
+          userId: testUser._id,
+          companyRoles: [
+            { companyName: 'Good Smile Company', roleName: 'Manufacturer' },
+            { companyName: 'AmiAmi', roleName: 'Distributor' }
+          ]
+        },
+        {
+          name: 'V3 Figure 3',
+          manufacturer: 'Alter',
+          userId: testUser._id,
+          companyRoles: [
+            { companyName: 'Alter', roleName: 'Manufacturer' }
+          ]
+        },
+        {
+          name: 'Legacy Figure',
+          manufacturer: 'Max Factory', // Legacy style - no companyRoles
+          userId: testUser._id
+        }
+      ];
+
+      await Figure.insertMany(figuresWithCompanyRoles);
+    });
+
+    it('should return v3ManufacturerStats from companyRoles with Manufacturer role', async () => {
+      const response = await request(app)
+        .get('/figures/stats')
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.v3ManufacturerStats).toBeDefined();
+
+      // v3ManufacturerStats contains companies with Manufacturer role only
+      const v3ManufacturerStats = response.body.data.v3ManufacturerStats;
+
+      // Good Smile Company (Manufacturer) appears in 2 figures
+      const gscManufacturer = v3ManufacturerStats.find(
+        (s: any) => s._id === 'Good Smile Company'
+      );
+      expect(gscManufacturer?.count).toBe(2);
+
+      // Alter (Manufacturer) appears in 1 figure
+      const alterManufacturer = v3ManufacturerStats.find(
+        (s: any) => s._id === 'Alter'
+      );
+      expect(alterManufacturer?.count).toBe(1);
+
+      // AmiAmi (Distributor) should NOT appear in v3ManufacturerStats
+      const amiAmiInManufacturer = v3ManufacturerStats.find(
+        (s: any) => s._id === 'AmiAmi'
+      );
+      expect(amiAmiInManufacturer).toBeUndefined();
+    });
+
+    it('should return both legacy manufacturerStats and v3ManufacturerStats', async () => {
+      const response = await request(app)
+        .get('/figures/stats')
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.manufacturerStats).toBeDefined();
+      expect(response.body.data.v3ManufacturerStats).toBeDefined();
+
+      // Legacy manufacturerStats aggregates the manufacturer field
+      const manufacturerStats = response.body.data.manufacturerStats;
+      const maxFactory = manufacturerStats.find((s: any) => s._id === 'Max Factory');
+      expect(maxFactory?.count).toBe(1);
+
+      // GSC appears 2 times in legacy manufacturer
+      const gsc = manufacturerStats.find((s: any) => s._id === 'Good Smile Company');
+      expect(gsc?.count).toBe(2);
+    });
+
+    it('should return v3ManufacturerStats and distributorStats filtered by role', async () => {
+      const response = await request(app)
+        .get('/figures/stats')
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+
+      // v3ManufacturerStats should only contain companies with Manufacturer role
+      const v3ManufacturerStats = response.body.data.v3ManufacturerStats;
+      expect(v3ManufacturerStats).toBeDefined();
+
+      // Good Smile Company is Manufacturer in 2 figures
+      const gscManufacturer = v3ManufacturerStats.find((s: any) => s._id === 'Good Smile Company');
+      expect(gscManufacturer?.count).toBe(2);
+
+      // Alter is Manufacturer in 1 figure
+      const alterManufacturer = v3ManufacturerStats.find((s: any) => s._id === 'Alter');
+      expect(alterManufacturer?.count).toBe(1);
+
+      // AmiAmi is NOT a Manufacturer, so should NOT appear in v3ManufacturerStats
+      const amiAmiInManufacturer = v3ManufacturerStats.find((s: any) => s._id === 'AmiAmi');
+      expect(amiAmiInManufacturer).toBeUndefined();
+
+      // distributorStats should only contain companies with Distributor role
+      const distributorStats = response.body.data.distributorStats;
+      expect(distributorStats).toBeDefined();
+
+      // AmiAmi is Distributor in 1 figure
+      const amiAmiDistributor = distributorStats.find((s: any) => s._id === 'AmiAmi');
+      expect(amiAmiDistributor?.count).toBe(1);
+
+      // Good Smile Company is NOT a Distributor, so should NOT appear in distributorStats
+      const gscInDistributor = distributorStats.find((s: any) => s._id === 'Good Smile Company');
+      expect(gscInDistributor).toBeUndefined();
     });
   });
 });

@@ -96,17 +96,44 @@ export const schemas = {
 
   figure: Joi.object({
     name: Joi.string().trim().min(2).max(100).required(),
-    manufacturer: Joi.string().trim().min(2).max(100).required(),
+    // Schema v3: manufacturer optional when companyRoles present
+    manufacturer: Joi.string().trim().min(2).max(100).optional().allow(''),
     type: Joi.string().valid('action figure', 'statue', 'collectible').default('action figure'),
     boxNumber: Joi.string().allow('').max(50).optional(),
     description: Joi.string().allow('').max(1000).optional(),
     location: Joi.string().trim().max(100).allow('').optional(),
-    scale: Joi.string().optional(), // Added to handle test data
+    scale: Joi.string().optional(),
     purchaseInfo: Joi.object({
       price: Joi.number().min(0).precision(2).optional(),
       date: Joi.date().optional(),
       source: Joi.string().max(100).allow('').optional()
-    }).optional()
+    }).optional(),
+    // Schema v3: Company/Artist roles
+    companyRoles: Joi.array().items(
+      Joi.object({
+        companyId: Joi.string().optional(),
+        companyName: Joi.string().trim().min(1).max(100).required(),
+        roleId: Joi.string().optional(),
+        roleName: Joi.string().optional()
+      })
+    ).optional(),
+    artistRoles: Joi.array().items(
+      Joi.object({
+        artistId: Joi.string().optional(),
+        artistName: Joi.string().trim().min(1).max(100).required(),
+        roleId: Joi.string().optional(),
+        roleName: Joi.string().optional()
+      })
+    ).optional(),
+    releases: Joi.array().items(
+      Joi.object({
+        date: Joi.string().optional(),
+        price: Joi.number().optional(),
+        currency: Joi.string().optional(),
+        jan: Joi.string().optional(),
+        isRerelease: Joi.boolean().optional()
+      })
+    ).optional()
   }),
 
   user: Joi.object({
@@ -137,53 +164,151 @@ export const schemas = {
       .try(
         Joi.number().integer().min(0).optional(),
         Joi.string().trim().pattern(/^\d+$/).optional()
-      ).optional()
+      ).optional(),
+    sortBy: Joi.string()
+      .valid('createdAt', 'updatedAt', 'name', 'manufacturer', 'scale')
+      .default('createdAt')
+      .optional(),
+    sortOrder: Joi.string()
+      .valid('asc', 'desc')
+      .default('desc')
+      .optional(),
+    // Collection status filter for owned/ordered/wished views
+    status: Joi.string()
+      .valid('owned', 'ordered', 'wished')
+      .optional()
   }).allow(null),
 
-  // Enhanced figure creation schema with optional MFC scraping
+  // Schema v3.0 - Enhanced figure creation schema
   figureCreate: Joi.object({
-    // Flexible name handling - conditional validation based on mfcLink presence
+    // Core fields - conditional validation based on mfcLink presence
     name: Joi.when('mfcLink', {
       is: Joi.exist(),
-      then: Joi.string().trim().max(100).allow('').optional(),
-      otherwise: Joi.string().trim().min(1).max(100).required()
+      then: Joi.string().trim().max(200).allow('').optional(),
+      otherwise: Joi.string().trim().min(1).max(200).required()
         .messages({
           'string.empty': 'Name is required',
           'any.required': 'Name is required',
           'string.min': 'Name is required'
         })
     }),
-    
-    // Flexible manufacturer handling - conditional validation based on mfcLink presence
     manufacturer: Joi.when('mfcLink', {
       is: Joi.exist(),
       then: Joi.string().trim().max(100).allow('').optional(),
       otherwise: Joi.string().trim().min(1).max(100).required()
         .messages({
           'string.empty': 'Manufacturer is required',
-          'any.required': 'Manufacturer is required', 
+          'any.required': 'Manufacturer is required',
           'string.min': 'Manufacturer is required'
         })
     }),
-    
+    scale: Joi.string().allow('').max(50).optional(),
+    location: Joi.string().trim().max(100).allow('').optional(),
+    storageDetail: Joi.string().trim().max(100).allow('').optional(),
+    boxNumber: Joi.string().allow('').max(50).optional(), // Legacy alias
+    imageUrl: Joi.string().uri().allow('').optional(),
+
+    // MFC integration - accept full URL or just item ID (e.g., "287844")
+    mfcLink: Joi.alternatives().try(
+      Joi.string().uri(),
+      Joi.string().pattern(/^\d+$/).max(20), // Just the numeric item ID
+      Joi.string().allow('')
+    ).optional(),
+    mfcId: Joi.number().integer().positive().optional(),
+    mfcAuth: Joi.string().allow('').optional(), // Not stored, only for scraping
+
+    // Product identification
+    jan: Joi.string().max(15).allow('').optional(), // JAN/EAN/UPC barcode
+
+    // Schema v3: MFC-specific fields
+    mfcTitle: Joi.string().max(300).allow('').optional(),
+    origin: Joi.string().max(200).allow('').optional(),
+    version: Joi.string().max(200).allow('').optional(),
+    category: Joi.string().max(100).allow('').optional(),
+    classification: Joi.string().max(100).allow('').optional(),
+    materials: Joi.string().max(200).allow('').optional(),
+    tags: Joi.array().items(Joi.string().max(50)).optional(),
+
+    // Schema v3: Company roles array
+    companyRoles: Joi.array().items(Joi.object({
+      companyId: Joi.string().allow('').optional(),
+      companyName: Joi.string().max(200).allow('').optional(),
+      roleId: Joi.string().allow('').optional(),
+      roleName: Joi.string().max(100).allow('').optional(),
+    })).optional(),
+
+    // Schema v3: Artist roles array
+    artistRoles: Joi.array().items(Joi.object({
+      artistId: Joi.string().allow('').optional(),
+      artistName: Joi.string().max(200).allow('').optional(),
+      roleId: Joi.string().allow('').optional(),
+      roleName: Joi.string().max(100).allow('').optional(),
+    })).optional(),
+
+    // Schema v3: Releases array
+    releases: Joi.array().items(Joi.object({
+      date: Joi.alternatives().try(Joi.date(), Joi.string().allow('')).optional(),
+      price: Joi.number().min(0).optional(),
+      currency: Joi.string().max(10).allow('').optional(),
+      jan: Joi.string().max(15).allow('').optional(),
+      isRerelease: Joi.boolean().optional(),
+    })).optional(),
+
+    // Release info (flat form fields mapped to releases array)
+    releaseDate: Joi.alternatives()
+      .try(Joi.date(), Joi.string().allow(''))
+      .optional(),
+    releasePrice: Joi.number().min(0).optional(),
+    releaseCurrency: Joi.string().max(10).allow('').optional(),
+
+    // Physical dimensions
+    heightMm: Joi.number().min(0).optional(),
+    widthMm: Joi.number().min(0).optional(),
+    depthMm: Joi.number().min(0).optional(),
+
+    // User-specific collection data
+    collectionStatus: Joi.string()
+      .valid('owned', 'ordered', 'wished')
+      .default('owned')
+      .optional(),
+    rating: Joi.number().integer().min(1).max(10).optional(),
+    wishRating: Joi.number().integer().min(1).max(5).optional(),
+    quantity: Joi.number().integer().min(1).default(1).optional(),
+    note: Joi.string().max(2000).allow('').optional(),
+
+    // Purchase info (flat form fields mapped to purchaseInfo object)
+    purchaseDate: Joi.alternatives()
+      .try(Joi.date(), Joi.string().allow(''))
+      .optional(),
+    purchasePrice: Joi.number().min(0).optional(),
+    purchaseCurrency: Joi.string().max(10).allow('').optional(),
+
+    // Merchant info (flat form fields mapped to merchant object)
+    merchantName: Joi.string().max(100).allow('').optional(),
+    merchantUrl: Joi.string().uri().allow('').optional(),
+
+    // Condition tracking - allow empty string (treated as unset)
+    figureCondition: Joi.string()
+      .valid('sealed', 'likenew', 'verygood', 'good', 'fair', 'poor', '')
+      .optional(),
+    figureConditionNotes: Joi.string().max(500).allow('').optional(),
+    boxCondition: Joi.string()
+      .valid('mint', 'verygood', 'good', 'fair', 'poor', '')
+      .optional(),
+    boxConditionNotes: Joi.string().max(500).allow('').optional(),
+
+    // Legacy/compatibility fields
     type: Joi.string().valid('action figure', 'statue', 'collectible')
       .default('action figure'),
-    
-    boxNumber: Joi.string().allow('').max(50).optional(),
     description: Joi.string().allow('').max(1000).optional(),
-    location: Joi.string().trim().max(100).allow('').optional(),
-    scale: Joi.string().allow('').max(50).optional(),
-    
     purchaseInfo: Joi.object({
       price: Joi.number().min(0).precision(2).optional(),
       date: Joi.alternatives()
-        .try(Joi.date().optional(), Joi.string().isoDate().optional()),
-      source: Joi.string().max(100).allow('').optional()
+        .try(Joi.date().optional(), Joi.string().allow('').optional()),
+      source: Joi.string().max(100).allow('').optional(),
+      currency: Joi.string().max(10).allow('').optional()
     }).optional(),
-    
-    // Enhanced MFC data handling with full flexibility
-    mfcLink: Joi.string().uri().optional(),
-    mfcUrl: Joi.string().uri().optional(),
+    mfcUrl: Joi.string().uri().allow('').optional(),
     mfcData: Joi.object({
       manufacturer: Joi.string().optional(),
       name: Joi.string().optional(),
@@ -191,28 +316,119 @@ export const schemas = {
       imageUrl: Joi.string().uri().optional()
     }).optional()
   })
-  // Note: Individual field validation will handle empty strings
-  // MFC validation is handled separately for flexibility
-  // Allow any additional fields for extreme flexibility
+  // Allow any additional fields for flexibility during transition
   .pattern(/.*/, Joi.any().optional())
-  // Provide default empty object if no data
   .default(() => ({})),
 
+  // Schema v3.0 - Enhanced figure update schema
   figureUpdate: Joi.object({
-    name: Joi.string().trim().min(2).max(100).optional(),
-    manufacturer: Joi.string().trim().min(2).max(100).optional(),
-    type: Joi.string().valid('action figure', 'statue', 'collectible').optional(),
-    boxNumber: Joi.string().allow('').max(50).optional(),
-    description: Joi.string().allow('').max(1000).optional(),
+    // Core fields
+    name: Joi.string().trim().max(200).allow('').optional(),
+    manufacturer: Joi.string().trim().max(100).allow('').optional(),
+    scale: Joi.string().allow('').max(50).optional(),
     location: Joi.string().trim().max(100).allow('').optional(),
-    scale: Joi.string().optional(),
+    storageDetail: Joi.string().trim().max(100).allow('').optional(),
+    boxNumber: Joi.string().allow('').max(50).optional(),
+    imageUrl: Joi.string().uri().allow('').optional(),
+
+    // MFC integration - accept full URL or just item ID (e.g., "287844")
+    mfcLink: Joi.alternatives().try(
+      Joi.string().uri(),
+      Joi.string().pattern(/^\d+$/).max(20), // Just the numeric item ID
+      Joi.string().allow('')
+    ).optional(),
+    mfcId: Joi.number().integer().positive().optional(),
+
+    // Product identification
+    jan: Joi.string().max(15).allow('').optional(),
+
+    // Schema v3: MFC-specific fields
+    mfcTitle: Joi.string().max(300).allow('').optional(),
+    origin: Joi.string().max(200).allow('').optional(),
+    version: Joi.string().max(200).allow('').optional(),
+    category: Joi.string().max(100).allow('').optional(),
+    classification: Joi.string().max(100).allow('').optional(),
+    materials: Joi.string().max(200).allow('').optional(),
+    tags: Joi.array().items(Joi.string().max(50)).optional(),
+
+    // Schema v3: Company roles array
+    companyRoles: Joi.array().items(Joi.object({
+      companyId: Joi.string().allow('').optional(),
+      companyName: Joi.string().max(200).allow('').optional(),
+      roleId: Joi.string().allow('').optional(),
+      roleName: Joi.string().max(100).allow('').optional(),
+    })).optional(),
+
+    // Schema v3: Artist roles array
+    artistRoles: Joi.array().items(Joi.object({
+      artistId: Joi.string().allow('').optional(),
+      artistName: Joi.string().max(200).allow('').optional(),
+      roleId: Joi.string().allow('').optional(),
+      roleName: Joi.string().max(100).allow('').optional(),
+    })).optional(),
+
+    // Schema v3: Releases array
+    releases: Joi.array().items(Joi.object({
+      date: Joi.alternatives().try(Joi.date(), Joi.string().allow('')).optional(),
+      price: Joi.number().min(0).optional(),
+      currency: Joi.string().max(10).allow('').optional(),
+      jan: Joi.string().max(15).allow('').optional(),
+      isRerelease: Joi.boolean().optional(),
+    })).optional(),
+
+    // Release info (flat form fields - legacy)
+    releaseDate: Joi.alternatives()
+      .try(Joi.date(), Joi.string().allow(''))
+      .optional(),
+    releasePrice: Joi.number().min(0).optional(),
+    releaseCurrency: Joi.string().max(10).allow('').optional(),
+
+    // Physical dimensions
+    heightMm: Joi.number().min(0).optional(),
+    widthMm: Joi.number().min(0).optional(),
+    depthMm: Joi.number().min(0).optional(),
+
+    // User-specific collection data
+    collectionStatus: Joi.string()
+      .valid('owned', 'ordered', 'wished')
+      .optional(),
+    rating: Joi.number().integer().min(1).max(10).optional(),
+    wishRating: Joi.number().integer().min(1).max(5).optional(),
+    quantity: Joi.number().integer().min(1).optional(),
+    note: Joi.string().max(2000).allow('').optional(),
+
+    // Purchase info
+    purchaseDate: Joi.alternatives()
+      .try(Joi.date(), Joi.string().allow(''))
+      .optional(),
+    purchasePrice: Joi.number().min(0).optional(),
+    purchaseCurrency: Joi.string().max(10).allow('').optional(),
+
+    // Merchant info
+    merchantName: Joi.string().max(100).allow('').optional(),
+    merchantUrl: Joi.string().uri().allow('').optional(),
+
+    // Condition tracking - allow empty string (treated as unset)
+    figureCondition: Joi.string()
+      .valid('sealed', 'likenew', 'verygood', 'good', 'fair', 'poor', '')
+      .optional(),
+    figureConditionNotes: Joi.string().max(500).allow('').optional(),
+    boxCondition: Joi.string()
+      .valid('mint', 'verygood', 'good', 'fair', 'poor', '')
+      .optional(),
+    boxConditionNotes: Joi.string().max(500).allow('').optional(),
+
+    // Legacy/compatibility
+    type: Joi.string().valid('action figure', 'statue', 'collectible').optional(),
+    description: Joi.string().allow('').max(1000).optional(),
     purchaseInfo: Joi.object({
       price: Joi.number().min(0).precision(2).optional(),
-      purchaseDate: Joi.date().iso().optional(),
-      store: Joi.string().max(100).optional()
+      date: Joi.alternatives()
+        .try(Joi.date(), Joi.string().allow(''))
+        .optional(),
+      source: Joi.string().max(100).allow('').optional(),
+      currency: Joi.string().max(10).allow('').optional()
     }).optional(),
-    mfcLink: Joi.string().uri().optional(),
-    imageUrl: Joi.string().uri().optional(),
     mfcData: Joi.object({
       manufacturer: Joi.string().optional(),
       name: Joi.string().optional(),
@@ -222,7 +438,7 @@ export const schemas = {
   })
   // Allow any additional fields for flexibility
   .pattern(/.*/, Joi.any().optional())
-  .min(1), // At least one field must be provided for update
+  .min(1),
 
   // User validation schemas
   userRegister: Joi.object({
@@ -266,12 +482,19 @@ export const schemas = {
   }),
 
   // Filter validation schema
+  // Note: max lengths increased to accommodate comma-separated multi-select values
   filter: Joi.object({
-    manufacturer: Joi.string().min(1).max(100).optional(),
+    manufacturer: Joi.string().min(1).max(500).optional(),
+    distributor: Joi.string().min(1).max(500).optional(),
     type: Joi.string().valid('action figure', 'statue', 'collectible').optional(),
-    scale: Joi.string().min(1).max(50).optional(),
-    location: Joi.string().min(1).max(100).optional(),
+    scale: Joi.string().min(1).max(200).optional(),
+    location: Joi.string().min(1).max(500).optional(),
+    origin: Joi.string().min(1).max(500).optional(),
+    category: Joi.string().min(1).max(500).optional(),
     boxNumber: Joi.string().min(1).max(50).optional(),
+    status: Joi.string().valid('owned', 'ordered', 'wished').optional(),
+    sortBy: Joi.string().valid('createdAt', 'updatedAt', 'name', 'manufacturer', 'paidPrice').optional(),
+    sortOrder: Joi.string().valid('asc', 'desc').optional(),
     page: Joi.alternatives()
       .try(
         Joi.number().integer().min(1).max(1000).default(1),
