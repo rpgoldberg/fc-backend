@@ -79,7 +79,7 @@ FROM node:25-alpine AS production
 ARG CACHE_BUST=2026-02-12-npm-11.10-openssl-patches
 
 # Build arguments for customization
-ARG GITHUB_ORG=rpgoldberg
+ARG GITHUB_ORG=FigureCollecting
 ARG GITHUB_REPO=fc-backend
 
 # Add labels for better tracking
