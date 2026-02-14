@@ -70,6 +70,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Links
 
-- [Repository](https://github.com/rpgoldberg/fc-backend)
-- [Issues](https://github.com/rpgoldberg/fc-backend/issues)
-- [Pull Requests](https://github.com/rpgoldberg/fc-backend/pulls)
+- [Repository](https://github.com/FigureCollecting/fc-backend)
+- [Issues](https://github.com/FigureCollecting/fc-backend/issues)
+- [Pull Requests](https://github.com/FigureCollecting/fc-backend/pulls)
