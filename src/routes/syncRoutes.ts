@@ -147,6 +147,50 @@ const WEBHOOK_SECRET = process.env.SCRAPER_WEBHOOK_SECRET || crypto.randomBytes(
 // Scraper service URL - in Docker it's 'scraper:3050', locally it's 'localhost:3080'
 const SCRAPER_SERVICE_URL = process.env.SCRAPER_SERVICE_URL || 'http://localhost:3080';
 
+// Stale session detection thresholds
+const STALE_SESSION_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes for on-demand check
+const STALE_CLEANUP_THRESHOLD_MS = 15 * 60 * 1000; // 15 minutes for periodic cleanup
+const STALE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;   // Run cleanup every 5 minutes
+
+/**
+ * Mark a stale SyncJob as failed.
+ * Used both by the active-job endpoint and the periodic cleanup.
+ */
+async function failStaleJob(job: ISyncJob): Promise<void> {
+  job.phase = 'failed';
+  job.message = 'Session timed out - no progress received';
+  job.completedAt = new Date();
+  await job.save();
+  console.log(`[SYNC] Stale session cleaned up: sessionId=${job.sessionId}, lastUpdated=${job.updatedAt.toISOString()}`);
+}
+
+/**
+ * Periodic cleanup: find and fail all SyncJobs that haven't been updated
+ * within the cleanup threshold. Prevents zombie jobs from accumulating.
+ */
+async function cleanupStaleSessions(): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - STALE_CLEANUP_THRESHOLD_MS);
+    const staleJobs = await SyncJob.find({
+      phase: { $nin: ['completed', 'failed', 'cancelled'] },
+      updatedAt: { $lt: cutoff }
+    });
+
+    for (const job of staleJobs) {
+      await failStaleJob(job);
+    }
+
+    if (staleJobs.length > 0) {
+      console.log(`[SYNC] Periodic cleanup: failed ${staleJobs.length} stale session(s)`);
+    }
+  } catch (error: any) {
+    console.error('[SYNC] Stale session cleanup error:', error.message);
+  }
+}
+
+// Start periodic stale session cleanup (unref so it doesn't prevent process exit)
+setInterval(cleanupStaleSessions, STALE_CLEANUP_INTERVAL_MS).unref();
+
 // Rate limiting for sync operations (restrictive - these are heavy operations)
 const syncLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -729,6 +773,25 @@ router.get('/active-job', protect, async (req, res) => {
       return res.json({
         success: true,
         hasActiveJob: false
+      });
+    }
+
+    // Check if the job is stale (no updates for 10+ minutes)
+    const timeSinceUpdate = Date.now() - activeJob.updatedAt.getTime();
+    if (timeSinceUpdate > STALE_SESSION_THRESHOLD_MS) {
+      await failStaleJob(activeJob);
+      // Return as a completed (failed) job so the frontend can show the failure
+      return res.json({
+        success: true,
+        hasActiveJob: false,
+        job: {
+          sessionId: activeJob.sessionId,
+          phase: activeJob.phase,
+          message: activeJob.message,
+          stats: activeJob.stats,
+          startedAt: activeJob.startedAt,
+          completedAt: activeJob.completedAt
+        }
       });
     }
 

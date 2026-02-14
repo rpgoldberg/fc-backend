@@ -181,6 +181,11 @@ See `.env.example` for complete configuration template. Run `./setup-local-env.s
   - Docker prod: `http://scraper:3050`
   - Docker Coolify dev: `http://scraper-dev:3090`
   - (Must match service/network name for container DNS resolution)
+- `BACKEND_URL`: Public URL of this backend service (used in webhook URLs sent to scraper)
+  - Local dev: `http://localhost:5080`
+  - Docker prod: `http://backend:5050`
+  - Docker Coolify dev: `http://backend:5090`
+  - (Must be reachable from the scraper container for sync webhook callbacks)
 - `PORT`: Port for backend service (prod: 5050, local dev: 5080)
 - `NODE_ENV`: Environment (development/production)
 
