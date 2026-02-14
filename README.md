@@ -181,6 +181,11 @@ See `.env.example` for complete configuration template. Run `./setup-local-env.s
   - Docker prod: `http://scraper:3050`
   - Docker Coolify dev: `http://scraper-dev:3090`
   - (Must match service/network name for container DNS resolution)
+- `BACKEND_URL`: Public URL of this backend service (used in webhook URLs sent to scraper)
+  - Local dev: `http://localhost:5080`
+  - Docker prod: `http://backend:5050`
+  - Docker Coolify dev: `http://backend:5090`
+  - (Must be reachable from the scraper container for sync webhook callbacks)
 - `PORT`: Port for backend service (prod: 5050, local dev: 5080)
 - `NODE_ENV`: Environment (development/production)
 
@@ -195,7 +200,9 @@ See `.env.example` for complete configuration template. Run `./setup-local-env.s
   - Falls back to regex search when not set or when `TEST_MODE=memory`
 
 **Debug Logging:**
-- `DEBUG`: Enable debug namespaces (e.g., `backend:*`, `backend:auth`, `backend:registration`)
+- `DEBUG`: Set to `true` to enable all application loggers (AUTH, SYNC, MAIN, DATABASE, etc.)
+- `DEBUG_LEVEL`: Log level threshold — `verbose`, `info`, `warn`, or `error` (default: `info` in development, `error` in production)
+- `DEBUG_MODULES`: Comma-separated list of modules to enable (e.g., `AUTH,SYNC`), or `*` for all. Only needed if `DEBUG` is not `true`
 - `SERVICE_AUTH_TOKEN_DEBUG`: Show partial tokens in logs for debugging (default: false)
 
 **Security Note:**
