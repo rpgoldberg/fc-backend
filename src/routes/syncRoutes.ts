@@ -127,13 +127,16 @@ async function processScrapedArtists(
 
 const router = express.Router();
 
-// General rate limiter applied to all sync routes
+// General rate limiter for user-facing sync routes
+// Webhook routes (/webhook/*) are exempt — they use HMAC signature auth
+// and must handle high-throughput item-complete callbacks during sync
 const generalSyncLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // 100 requests per 15 minutes
   message: { success: false, message: 'Too many requests, please try again later' },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.path.startsWith('/webhook/'),
 });
 router.use(generalSyncLimiter);
 
