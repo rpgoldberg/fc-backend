@@ -36,3 +36,10 @@ export {
   SyncPhase,
   SyncItemStatus
 } from './SyncJob';
+export {
+  default as MfcList,
+  IMfcList,
+  IMfcListData,
+  ListPrivacy,
+  MFC_LIST_LIMITS
+} from './MfcList';

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import mongoose from 'mongoose';
+import { MFC_LIST_LIMITS } from '../models/MfcList';
 
 export const validateRequest = (schema: Joi.ObjectSchema, source: 'body' | 'query' = 'body') => {
   return (req: Request, res: Response, next: NextFunction): void | Response => {
@@ -505,7 +506,44 @@ export const schemas = {
         Joi.number().integer().min(1).max(100).default(10),
         Joi.string().trim().pattern(/^\d+$/).min(1).max(3).default('10')
       ).default(10)
-  })
+  }),
+
+  // List validation schemas — limits match MFC edit form to prevent round-trip data loss
+  listCreate: Joi.object({
+    mfcId: Joi.number().integer().required()
+      .messages({ 'any.required': 'mfcId is required' }),
+    name: Joi.string().trim().min(1).max(MFC_LIST_LIMITS.NAME_MAX).required()
+      .messages({
+        'any.required': 'name is required',
+        'string.empty': 'name is required'
+      }),
+    teaser: Joi.string().trim().max(MFC_LIST_LIMITS.TEASER_MAX).allow('').optional(),
+    description: Joi.string().allow('').optional(),
+    privacy: Joi.string().valid('public', 'friends', 'private').optional(),
+    iconUrl: Joi.string().allow('').optional(),
+    allowComments: Joi.boolean().optional(),
+    mailOnSales: Joi.boolean().optional(),
+    mailOnHunts: Joi.boolean().optional(),
+    itemMfcIds: Joi.array().items(Joi.number().integer()).optional(),
+    mfcCreatedAt: Joi.date().optional(),
+    mfcLastEditedAt: Joi.date().optional(),
+    lastSyncedAt: Joi.date().optional()
+  }),
+
+  listUpdate: Joi.object({
+    name: Joi.string().trim().min(1).max(MFC_LIST_LIMITS.NAME_MAX).optional(),
+    teaser: Joi.string().trim().max(MFC_LIST_LIMITS.TEASER_MAX).allow('').optional(),
+    description: Joi.string().allow('').optional(),
+    privacy: Joi.string().valid('public', 'friends', 'private').optional(),
+    iconUrl: Joi.string().allow('').optional(),
+    allowComments: Joi.boolean().optional(),
+    mailOnSales: Joi.boolean().optional(),
+    mailOnHunts: Joi.boolean().optional(),
+    itemMfcIds: Joi.array().items(Joi.number().integer()).optional(),
+    mfcCreatedAt: Joi.date().optional(),
+    mfcLastEditedAt: Joi.date().optional(),
+    lastSyncedAt: Joi.date().optional()
+  }).min(1)
 };
 
 // Content-type validation middleware
