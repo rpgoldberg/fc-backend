@@ -13,7 +13,7 @@ import express, { Response } from 'express';
 import crypto from 'crypto';
 import { protect } from '../middleware/authMiddleware';
 import rateLimit from 'express-rate-limit';
-import { SyncJob, ISyncJob, SyncItemStatus, Figure, Company, Artist, RoleType } from '../models';
+import { SyncJob, ISyncJob, SyncItemStatus, Figure, Company, Artist, RoleType, MfcList } from '../models';
 import mongoose from 'mongoose';
 import { syncLogger } from '../utils/logger';
 
@@ -683,6 +683,82 @@ router.post('/webhook/phase-change', async (req, res) => {
     return res.json({ success: true });
   } catch (error: any) {
     console.error('[WEBHOOK] phase-change error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Webhook processing failed'
+    });
+  }
+});
+
+/**
+ * POST /sync/webhook/lists-sync
+ * Webhook called by scraper to sync user's MFC lists.
+ * Upserts lists into MfcList collection using the userId from the SyncJob.
+ */
+router.post('/webhook/lists-sync', async (req, res) => {
+  try {
+    const signature = req.headers['x-webhook-signature'] as string;
+    const rawBody = JSON.stringify(req.body);
+
+    if (!verifyWebhookSignature(signature, rawBody)) {
+      return res.status(401).json({ success: false, message: 'Invalid webhook signature' });
+    }
+
+    const { sessionId, lists } = req.body as {
+      sessionId: string;
+      lists: Array<{
+        mfcId: number;
+        name: string;
+        teaser?: string;
+        privacy?: string;
+        iconUrl?: string;
+        itemCount?: number;
+        itemMfcIds?: number[];
+        mfcCreatedAt?: string;
+      }>;
+    };
+
+    if (!sessionId || !lists || !Array.isArray(lists)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: sessionId, lists'
+      });
+    }
+
+    // Look up SyncJob to get the userId
+    const job = await SyncJob.findOne({ sessionId });
+    if (!job) {
+      return res.status(404).json({ success: false, message: 'SyncJob not found' });
+    }
+
+    const userId = job.userId;
+    let upsertCount = 0;
+
+    for (const listData of lists) {
+      const { mfcId, ...rest } = listData;
+
+      await MfcList.findOneAndUpdate(
+        { userId, mfcId },
+        {
+          $set: {
+            ...rest,
+            userId,
+            mfcId,
+            itemCount: rest.itemMfcIds ? rest.itemMfcIds.length : (rest.itemCount || 0),
+            lastSyncedAt: new Date()
+          }
+        },
+        { upsert: true, new: true }
+      );
+
+      upsertCount++;
+    }
+
+    console.log(`[WEBHOOK] lists-sync: upserted ${upsertCount} lists for session ${sessionId}`);
+
+    return res.json({ success: true, upserted: upsertCount });
+  } catch (error: any) {
+    console.error('[WEBHOOK] lists-sync error:', error);
     return res.status(500).json({
       success: false,
       message: error.message || 'Webhook processing failed'
