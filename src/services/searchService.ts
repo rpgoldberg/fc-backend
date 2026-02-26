@@ -4,6 +4,9 @@ import { createLogger } from '../utils/logger';
 
 const logger = createLogger('SEARCH');
 
+/** Escape regex special characters in a string for safe use in MongoDB $regex */
+const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
+
 export interface SearchOptions {
   limit?: number;
   offset?: number;
@@ -55,6 +58,25 @@ export const computeRegexScore = (doc: any, query: string): number => {
     // Location/boxNumber (lower weight)
     if (location.includes(term)) score += 0.5;
     if (boxNumber.includes(term)) score += 0.5;
+
+    // v3 fields (moderate weight)
+    const origin = (doc.origin || '').toLowerCase();
+    const version = (doc.version || '').toLowerCase();
+    const category = (doc.category || '').toLowerCase();
+    if (origin.includes(term)) score += 0.75;
+    if (version.includes(term)) score += 0.5;
+    if (category.includes(term)) score += 0.5;
+
+    // companyRoles (matches manufacturer weight)
+    const companyRoles = doc.companyRoles || [];
+    for (const role of companyRoles) {
+      const companyName = (role.companyName || '').toLowerCase();
+      if (companyName.startsWith(term) || companyName.includes(` ${term}`)) {
+        score += 1.25;
+      } else if (companyName.includes(term)) {
+        score += 0.75;
+      }
+    }
   }
 
   return Math.round(score * 100) / 100; // Round to 2 decimal places
@@ -379,16 +401,23 @@ export const figureSearch = async (
     // Fallback: regex search across multiple fields
     const searchTerms = searchQuery.split(' ').filter(term => term.trim().length > 0);
 
-    // Create regex patterns for each search term
-    const regexConditions = searchTerms.map(term => ({
-      $or: [
-        { manufacturer: { $regex: term, $options: 'i' } },
-        { name: { $regex: term, $options: 'i' } },
-        { scale: { $regex: `^${term}$`, $options: 'i' } },
-        { location: { $regex: term, $options: 'i' } },
-        { boxNumber: { $regex: term, $options: 'i' } }
-      ]
-    }));
+    // Create regex patterns for each search term (escaped to prevent regex injection)
+    const regexConditions = searchTerms.map(term => {
+      const escaped = escapeRegex(term);
+      return {
+        $or: [
+          { manufacturer: { $regex: escaped, $options: 'i' } },
+          { name: { $regex: escaped, $options: 'i' } },
+          { scale: { $regex: `^${escaped}$`, $options: 'i' } },
+          { location: { $regex: escaped, $options: 'i' } },
+          { boxNumber: { $regex: escaped, $options: 'i' } },
+          { origin: { $regex: escaped, $options: 'i' } },
+          { version: { $regex: escaped, $options: 'i' } },
+          { category: { $regex: escaped, $options: 'i' } },
+          { 'companyRoles.companyName': { $regex: escaped, $options: 'i' } },
+        ]
+      };
+    });
 
     // Fetch with performance cap
     const results = await Figure.find({

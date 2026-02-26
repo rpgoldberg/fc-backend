@@ -81,6 +81,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue(mockFigures)
       };
@@ -92,6 +93,7 @@ describe('FigureController', () => {
 
       expect(MockedFigure.find).toHaveBeenCalledWith({ userId: '000000000000000000000123' });
       expect(mockFind.sort).toHaveBeenCalledWith({ createdAt: -1 });
+      expect(mockFind.collation).toHaveBeenCalledWith({ locale: 'en', strength: 2 });
       expect(mockFind.skip).toHaveBeenCalledWith(0);
       expect(mockFind.limit).toHaveBeenCalledWith(10);
       expect(mockResponse.status).toHaveBeenCalledWith(200);
@@ -110,6 +112,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -670,6 +673,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -1446,6 +1450,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -1503,6 +1508,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -1525,6 +1531,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2113,6 +2120,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2137,6 +2145,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2157,6 +2166,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2177,6 +2187,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2199,6 +2210,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2219,6 +2231,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2239,6 +2252,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2259,6 +2273,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2281,6 +2296,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2301,6 +2317,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2321,6 +2338,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2343,6 +2361,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2415,6 +2434,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2444,6 +2464,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2473,6 +2494,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2493,6 +2515,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };

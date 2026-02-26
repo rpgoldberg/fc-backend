@@ -168,6 +168,7 @@ export const schemas = {
       ).optional(),
     sortBy: Joi.string()
       .valid('createdAt', 'updatedAt', 'name', 'manufacturer', 'scale')
+      .insensitive()
       .default('createdAt')
       .optional(),
     sortOrder: Joi.string()
@@ -493,8 +494,11 @@ export const schemas = {
     origin: Joi.string().min(1).max(500).optional(),
     category: Joi.string().min(1).max(500).optional(),
     boxNumber: Joi.string().min(1).max(50).optional(),
+    sculptor: Joi.string().min(1).max(500).optional(),
+    illustrator: Joi.string().min(1).max(500).optional(),
+    classification: Joi.string().min(1).max(500).optional(),
     status: Joi.string().valid('owned', 'ordered', 'wished').optional(),
-    sortBy: Joi.string().valid('createdAt', 'updatedAt', 'name', 'manufacturer', 'paidPrice').optional(),
+    sortBy: Joi.string().valid('createdAt', 'updatedAt', 'name', 'manufacturer', 'scale').insensitive().optional(),
     sortOrder: Joi.string().valid('asc', 'desc').optional(),
     page: Joi.alternatives()
       .try(

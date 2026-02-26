@@ -360,7 +360,7 @@ export const getFigures = async (req: Request, res: Response) => {
 
     // Validate sortBy parameter
     const sortByParam = req.query.sortBy as string;
-    const validSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
+    const validSortFields = ['createdAt', 'updatedAt', 'name', 'manufacturer', 'scale'];
     if (sortByParam && !validSortFields.includes(sortByParam)) {
       validationErrors.push(`sortBy must be one of: ${validSortFields.join(', ')}`);
     }
@@ -422,12 +422,13 @@ export const getFigures = async (req: Request, res: Response) => {
     }
 
     // Build dynamic sort object - use allowlist guard for property injection safety
-    const allowedSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
+    const allowedSortFields = ['createdAt', 'updatedAt', 'name', 'manufacturer', 'scale'];
     const safeSortBy = allowedSortFields.includes(validSortBy) ? validSortBy : 'createdAt';
     const sortOptions: Record<string, 1 | -1> = { [safeSortBy]: validSortOrder };
 
     const figures = await Figure.find(query)
       .sort(sortOptions)
+      .collation({ locale: 'en', strength: 2 })
       .skip(skip)
       .limit(validLimit);
 
@@ -1108,7 +1109,7 @@ export const filterFigures = async (req: Request, res: Response) => {
       });
     }
     const userId = req.user.id;
-    const { manufacturer, scale, location, boxNumber, status, origin, category, distributor } = req.query;
+    const { manufacturer, scale, location, boxNumber, status, origin, category, distributor, sculptor, illustrator, classification } = req.query;
 
     const query: any = { userId };
 
@@ -1240,6 +1241,57 @@ export const filterFigures = async (req: Request, res: Response) => {
       }
     }
 
+    // Filter by sculptor (Schema v3 artistRoles with Sculptor role)
+    if (sculptor) {
+      const values = (sculptor as string).split(',').map(v => v.trim()).filter(Boolean);
+      const sculptorPatterns = values.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'));
+
+      query.$and = query.$and || [];
+      query.$and.push({
+        artistRoles: {
+          $elemMatch: {
+            roleName: 'Sculptor',
+            artistName: values.length > 1 ? { $in: sculptorPatterns } : sculptorPatterns[0]
+          }
+        }
+      });
+    }
+
+    // Filter by illustrator (Schema v3 artistRoles with Illustrator role)
+    if (illustrator) {
+      const values = (illustrator as string).split(',').map(v => v.trim()).filter(Boolean);
+      const illustratorPatterns = values.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'));
+
+      query.$and = query.$and || [];
+      query.$and.push({
+        artistRoles: {
+          $elemMatch: {
+            roleName: 'Illustrator',
+            artistName: values.length > 1 ? { $in: illustratorPatterns } : illustratorPatterns[0]
+          }
+        }
+      });
+    }
+
+    // Filter by classification
+    if (classification) {
+      const values = (classification as string).split(',').map(v => v.trim()).filter(Boolean);
+      const hasUnspecified = values.includes('__unspecified__');
+      const specifiedValues = values.filter(v => v !== '__unspecified__');
+
+      if (hasUnspecified && specifiedValues.length > 0) {
+        query.classification = {
+          $in: [null, '', ...specifiedValues.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'))]
+        };
+      } else if (hasUnspecified) {
+        query.classification = { $in: [null, ''] };
+      } else {
+        query.classification = specifiedValues.length > 1
+          ? { $in: specifiedValues.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i')) }
+          : { $regex: `^${escapeRegex(specifiedValues[0])}$`, $options: 'i' };
+      }
+    }
+
     const pageParam = req.query.page as string;
     const page = parseInt(pageParam, 10);
     if (pageParam && (isNaN(page) || page <= 0)) {
@@ -1262,7 +1314,7 @@ export const filterFigures = async (req: Request, res: Response) => {
 
     // Validate sortBy parameter
     const sortByParam = req.query.sortBy as string;
-    const validSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
+    const validSortFields = ['createdAt', 'updatedAt', 'name', 'manufacturer', 'scale'];
     if (sortByParam && !validSortFields.includes(sortByParam)) {
       return res.status(400).json({
         success: false,
@@ -1300,12 +1352,13 @@ export const filterFigures = async (req: Request, res: Response) => {
     }
 
     // Build dynamic sort object - use allowlist guard for property injection safety
-    const allowedSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
+    const allowedSortFields = ['createdAt', 'updatedAt', 'name', 'manufacturer', 'scale'];
     const safeSortBy = allowedSortFields.includes(validSortBy) ? validSortBy : 'createdAt';
     const sortOptions: Record<string, 1 | -1> = { [safeSortBy]: validSortOrder };
 
     const figures = await Figure.find(query)
       .sort(sortOptions)
+      .collation({ locale: 'en', strength: 2 })
       .skip(skip)
       .limit(validLimit);
 
@@ -1396,53 +1449,78 @@ export const getFigureStats = async (req: Request, res: Response) => {
     // Total count (filtered by status if provided)
     const totalCount = await Figure.countDocuments(baseMatch);
 
-    // Count by manufacturer (filtered)
+    // Count by manufacturer (filtered) - case-insensitive grouping
     const manufacturerStats = await Figure.aggregate([
       { $match: baseMatch },
-      { $group: { _id: '$manufacturer', count: { $sum: 1 } } },
+      { $group: {
+        _id: { $toLower: '$manufacturer' },
+        displayName: { $first: '$manufacturer' },
+        count: { $sum: 1 }
+      }},
+      { $project: { _id: '$displayName', count: 1 } },
       { $sort: { count: -1 } }
     ]);
 
-    // Count by scale (filtered)
+    // Count by scale (filtered) - case-insensitive grouping
     const scaleStats = await Figure.aggregate([
       { $match: baseMatch },
-      { $group: { _id: '$scale', count: { $sum: 1 } } },
+      { $group: {
+        _id: { $toLower: '$scale' },
+        displayName: { $first: '$scale' },
+        count: { $sum: 1 }
+      }},
+      { $project: { _id: '$displayName', count: 1 } },
       { $sort: { count: -1 } }
     ]);
 
-    // Count by location (filtered)
+    // Count by location (filtered) - case-insensitive grouping
     const locationStats = await Figure.aggregate([
       { $match: baseMatch },
-      { $group: { _id: '$location', count: { $sum: 1 } } },
+      { $group: {
+        _id: { $toLower: '$location' },
+        displayName: { $first: '$location' },
+        count: { $sum: 1 }
+      }},
+      { $project: { _id: '$displayName', count: 1 } },
       { $sort: { count: -1 } }
     ]);
 
-    // Count by origin/franchise (filtered) - Schema v3
+    // Count by origin/franchise (filtered) - Schema v3, case-insensitive grouping
     const originStats = await Figure.aggregate([
       { $match: baseMatch },
-      { $group: { _id: '$origin', count: { $sum: 1 } } },
+      { $group: {
+        _id: { $toLower: '$origin' },
+        displayName: { $first: '$origin' },
+        count: { $sum: 1 }
+      }},
+      { $project: { _id: '$displayName', count: 1 } },
       { $sort: { count: -1 } }
     ]);
 
-    // Count by category/type (filtered) - Schema v3
+    // Count by category/type (filtered) - Schema v3, case-insensitive grouping
     const categoryStats = await Figure.aggregate([
       { $match: baseMatch },
-      { $group: { _id: '$category', count: { $sum: 1 } } },
+      { $group: {
+        _id: { $toLower: '$category' },
+        displayName: { $first: '$category' },
+        count: { $sum: 1 }
+      }},
+      { $project: { _id: '$displayName', count: 1 } },
       { $sort: { count: -1 } }
     ]);
 
     // Schema v3: Count manufacturers from companyRoles (filtered)
-    // This groups by companyName where roleName is 'Manufacturer'
+    // Case-insensitive grouping to match filter behavior
     const v3ManufacturerStats = await Figure.aggregate([
       { $match: baseMatch },
       { $unwind: { path: '$companyRoles', preserveNullAndEmptyArrays: false } },
       { $match: { 'companyRoles.roleName': 'Manufacturer' } },
-      {
-        $group: {
-          _id: '$companyRoles.companyName',
-          count: { $sum: 1 }
-        }
-      },
+      { $group: {
+        _id: { $toLower: '$companyRoles.companyName' },
+        displayName: { $first: '$companyRoles.companyName' },
+        count: { $sum: 1 }
+      }},
+      { $project: { _id: '$displayName', count: 1 } },
       { $sort: { count: -1 } }
     ]);
 
@@ -1451,12 +1529,52 @@ export const getFigureStats = async (req: Request, res: Response) => {
       { $match: baseMatch },
       { $unwind: { path: '$companyRoles', preserveNullAndEmptyArrays: false } },
       { $match: { 'companyRoles.roleName': 'Distributor' } },
-      {
-        $group: {
-          _id: '$companyRoles.companyName',
-          count: { $sum: 1 }
-        }
-      },
+      { $group: {
+        _id: { $toLower: '$companyRoles.companyName' },
+        displayName: { $first: '$companyRoles.companyName' },
+        count: { $sum: 1 }
+      }},
+      { $project: { _id: '$displayName', count: 1 } },
+      { $sort: { count: -1 } }
+    ]);
+
+    // Schema v3: Count sculptors from artistRoles (filtered)
+    const sculptorStats = await Figure.aggregate([
+      { $match: baseMatch },
+      { $unwind: { path: '$artistRoles', preserveNullAndEmptyArrays: false } },
+      { $match: { 'artistRoles.roleName': 'Sculptor' } },
+      { $group: {
+        _id: { $toLower: '$artistRoles.artistName' },
+        displayName: { $first: '$artistRoles.artistName' },
+        count: { $sum: 1 }
+      }},
+      { $project: { _id: '$displayName', count: 1 } },
+      { $sort: { count: -1 } }
+    ]);
+
+    // Schema v3: Count illustrators from artistRoles (filtered)
+    const illustratorStats = await Figure.aggregate([
+      { $match: baseMatch },
+      { $unwind: { path: '$artistRoles', preserveNullAndEmptyArrays: false } },
+      { $match: { 'artistRoles.roleName': 'Illustrator' } },
+      { $group: {
+        _id: { $toLower: '$artistRoles.artistName' },
+        displayName: { $first: '$artistRoles.artistName' },
+        count: { $sum: 1 }
+      }},
+      { $project: { _id: '$displayName', count: 1 } },
+      { $sort: { count: -1 } }
+    ]);
+
+    // Schema v3: Count by classification (filtered)
+    const classificationStats = await Figure.aggregate([
+      { $match: baseMatch },
+      { $group: {
+        _id: { $toLower: '$classification' },
+        displayName: { $first: '$classification' },
+        count: { $sum: 1 }
+      }},
+      { $project: { _id: '$displayName', count: 1 } },
       { $sort: { count: -1 } }
     ]);
 
@@ -1477,6 +1595,9 @@ export const getFigureStats = async (req: Request, res: Response) => {
         locationStats,
         originStats,
         categoryStats,
+        sculptorStats,
+        illustratorStats,
+        classificationStats,
         activeStatus: collectionStatus || null
       }
     });
