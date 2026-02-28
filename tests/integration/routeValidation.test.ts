@@ -110,8 +110,6 @@ describe('Route Validation and Error Handling', () => {
           name: longString,
           scale: longString,
           mfcLink: longString,
-          location: longString,
-          boxNumber: longString,
           imageUrl: longString
         };
 
@@ -131,8 +129,6 @@ describe('Route Validation and Error Handling', () => {
           name: 'Test Figure',
           scale: null,
           mfcLink: null,
-          location: null,
-          boxNumber: null,
           imageUrl: null
         };
 
@@ -401,7 +397,6 @@ describe('Route Validation and Error Handling', () => {
       it('should handle regex injection attempts', async () => {
         const maliciousFilters = [
           'manufacturer=.*',
-          'location=^.*$',
           'manufacturer=(.*)',
           'scale=[a-z]*'
         ];
@@ -514,8 +509,6 @@ describe('Route Validation and Error Handling', () => {
         manufacturer: 'Large Manufacturer',
         name: 'Large Figure',
         scale: '1/8',
-        location: 'A'.repeat(1000),
-        boxNumber: 'B'.repeat(1000),
         imageUrl: 'http://example.com/' + 'c'.repeat(1000) + '.jpg'
       };
 

@@ -73,11 +73,6 @@ export interface IFigure extends Document {
   classification?: string;  // Classification (e.g., "Goods")
   materials?: string;       // Materials (e.g., "PVC, ABS")
 
-  // Storage/location
-  location?: string;
-  storageDetail?: string;
-  boxNumber?: string; // Legacy alias for storageDetail
-
   // Media
   imageUrl?: string;
   imageUrls?: string[];
@@ -95,6 +90,7 @@ export interface IFigure extends Document {
   // User-specific collection data
   userId: mongoose.Types.ObjectId;
   collectionStatus?: 'owned' | 'ordered' | 'wished';
+  mfcActivityOrder?: number;
   quantity?: number;
   rating?: number;
   wishRating?: number;
@@ -202,11 +198,6 @@ const FigureSchema = new Schema<IFigure>(
     classification: { type: String },  // Classification
     materials: { type: String },       // Materials
 
-    // Storage/location
-    location: { type: String },
-    storageDetail: { type: String },
-    boxNumber: { type: String }, // Legacy
-
     // Media
     imageUrl: { type: String },
     imageUrls: { type: [String], default: [] },
@@ -233,6 +224,7 @@ const FigureSchema = new Schema<IFigure>(
       enum: ['owned', 'ordered', 'wished'],
       default: 'owned'
     },
+    mfcActivityOrder: { type: Number },
     quantity: { type: Number, default: 1, min: 1 },
     rating: { type: Number, min: 1, max: 10 },
     wishRating: { type: Number, min: 1, max: 5 },
@@ -266,8 +258,8 @@ const FigureSchema = new Schema<IFigure>(
 
 // Indexes for performance
 FigureSchema.index({ manufacturer: 1, name: 1 });
-FigureSchema.index({ location: 1, storageDetail: 1 });
 FigureSchema.index({ userId: 1, collectionStatus: 1 });
+FigureSchema.index({ userId: 1, collectionStatus: 1, mfcActivityOrder: 1 });
 FigureSchema.index({ userId: 1, rating: -1 });
 
 // Text index for search

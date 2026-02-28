@@ -10,6 +10,23 @@ export interface IUser extends Document {
   password: string;
   isAdmin: boolean;
   colorProfile: ColorProfile;
+  emailVerified: boolean;
+  emailVerifiedAt?: Date;
+  emailVerificationGraceExpiry?: Date;
+  twoFactorEnabled: boolean;
+  totp?: {
+    secret: string;
+    verified: boolean;
+  };
+  backupCodes?: string[];
+  webauthnCredentials: Array<{
+    credentialId: string;
+    publicKey: string;
+    signCount: number;
+    transports?: string[];
+    nickname?: string;
+    createdAt: Date;
+  }>;
   comparePassword(candidatePassword: string): Promise<boolean>;
   createdAt: Date;
   updatedAt: Date;
@@ -39,7 +56,37 @@ const UserSchema = new Schema<IUser>(
       type: String,
       enum: ['light', 'dark', 'terminal', 'surprise'],
       default: 'light'
-    }
+    },
+    emailVerified: {
+      type: Boolean,
+      default: false
+    },
+    emailVerifiedAt: {
+      type: Date
+    },
+    emailVerificationGraceExpiry: {
+      type: Date
+    },
+    twoFactorEnabled: {
+      type: Boolean,
+      default: false
+    },
+    totp: {
+      secret: { type: String, select: false },
+      verified: { type: Boolean, default: false }
+    },
+    backupCodes: {
+      type: [String],
+      select: false
+    },
+    webauthnCredentials: [{
+      credentialId: { type: String, required: true },
+      publicKey: { type: String, required: true, select: false },
+      signCount: { type: Number, default: 0 },
+      transports: [String],
+      nickname: { type: String, maxlength: 50 },
+      createdAt: { type: Date, default: Date.now }
+    }]
   },
   { timestamps: true }
 );

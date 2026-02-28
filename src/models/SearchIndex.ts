@@ -21,6 +21,17 @@ export interface ISearchIndexData {
   tags?: string[];
   popularity?: number;
   mfcId?: number;
+  userId?: mongoose.Types.ObjectId;
+  figureName?: string;
+  scale?: string;
+  mfcLink?: string;
+  imageUrl?: string;
+  origin?: string;
+  category?: string;
+  companyRoles?: Array<{ companyName: string; roleName: string }>;
+  artistRoles?: Array<{ artistName: string; roleName: string }>;
+  releaseJans?: string[];
+  releaseDates?: Date[];
 }
 
 /**
@@ -40,6 +51,17 @@ export interface ISearchIndex extends Document {
   tags: string[];
   popularity?: number;
   mfcId?: number;
+  userId?: mongoose.Types.ObjectId;
+  figureName?: string;
+  scale?: string;
+  mfcLink?: string;
+  imageUrl?: string;
+  origin?: string;
+  category?: string;
+  companyRoles?: Array<{ companyName: string; roleName: string }>;
+  artistRoles?: Array<{ artistName: string; roleName: string }>;
+  releaseJans?: string[];
+  releaseDates?: Date[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -80,7 +102,31 @@ const SearchIndexSchema = new Schema<ISearchIndex>(
       type: Number,
       sparse: true,
       index: true
-    }
+    },
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      sparse: true,
+      index: true
+    },
+    figureName: { type: String },
+    scale: { type: String },
+    mfcLink: { type: String },
+    imageUrl: { type: String },
+    origin: { type: String },
+    category: { type: String },
+    companyRoles: [{
+      companyName: { type: String },
+      roleName: { type: String },
+      _id: false
+    }],
+    artistRoles: [{
+      artistName: { type: String },
+      roleName: { type: String },
+      _id: false
+    }],
+    releaseJans: [{ type: String }],
+    releaseDates: [{ type: Date }]
   },
   { timestamps: true }
 );
@@ -89,13 +135,13 @@ const SearchIndexSchema = new Schema<ISearchIndex>(
 SearchIndexSchema.virtual('entityTypeRef').get(function() {
   switch (this.entityType) {
     case 'figure':
-      return 'MFCItem';
+      return 'Figure';
     case 'company':
       return 'Company';
     case 'artist':
       return 'Artist';
     default:
-      return 'MFCItem';
+      return 'Figure';
   }
 });
 
@@ -110,6 +156,9 @@ SearchIndexSchema.index({ entityType: 1, popularity: -1 });
 
 // Index for tag-based filtering with popularity
 SearchIndexSchema.index({ tags: 1, popularity: -1 });
+
+// Index for user-specific entity queries
+SearchIndexSchema.index({ userId: 1, entityType: 1 });
 
 const SearchIndex: Model<ISearchIndex> = mongoose.model<ISearchIndex>('SearchIndex', SearchIndexSchema);
 

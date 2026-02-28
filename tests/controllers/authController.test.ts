@@ -84,11 +84,12 @@ describe('AuthController', () => {
       expect(MockedUser.findOne).toHaveBeenCalledWith({
         $or: [{ email: 'test@example.com' }, { username: 'testuser' }]
       });
-      expect(MockedUser.create).toHaveBeenCalledWith({
+      expect(MockedUser.create).toHaveBeenCalledWith(expect.objectContaining({
         username: 'testuser',
         email: 'test@example.com',
-        password: 'password123'
-      });
+        password: 'password123',
+        emailVerified: false,
+      }));
       expect(MockedRefreshToken.create).toHaveBeenCalledWith(expect.objectContaining({
         user: 'user123',
         token: 'hashed-refresh-token', // Now expecting hashed token
@@ -98,14 +99,15 @@ describe('AuthController', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(201);
       expect(mockResponse.json).toHaveBeenCalledWith({
         success: true,
-        data: {
+        data: expect.objectContaining({
           _id: 'user123',
           username: 'testuser',
           email: 'test@example.com',
           isAdmin: false,
+          emailVerified: false,
           accessToken: 'access-token',
           refreshToken: 'refresh-token'
-        }
+        })
       });
     });
 
@@ -156,7 +158,12 @@ describe('AuthController', () => {
         username: 'testuser',
         email: 'test@example.com',
         isAdmin: false,
-        comparePassword: jest.fn().mockResolvedValue(true)
+        colorProfile: 'dark',
+        emailVerified: true,
+        twoFactorEnabled: false,
+        webauthnCredentials: [],
+        comparePassword: jest.fn().mockResolvedValue(true),
+        save: jest.fn()
       };
 
       MockedUser.findOne = jest.fn().mockResolvedValue(mockUser);
@@ -188,6 +195,10 @@ describe('AuthController', () => {
           username: 'testuser',
           email: 'test@example.com',
           isAdmin: false,
+          colorProfile: 'dark',
+          emailVerified: true,
+          twoFactorEnabled: false,
+          webauthnCredentialCount: 0,
           accessToken: 'access-token',
           refreshToken: 'refresh-token'
         }
@@ -509,6 +520,10 @@ describe('AuthController', () => {
           email: 'test@example.com',
           isAdmin: false,
           colorProfile: 'dark',
+          emailVerified: false,
+          twoFactorEnabled: false,
+          webauthnCredentialCount: 0,
+          webauthnCredentials: [],
           createdAt: mockUser.createdAt,
           updatedAt: mockUser.updatedAt
         }

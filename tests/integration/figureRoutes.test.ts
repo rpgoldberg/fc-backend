@@ -310,8 +310,6 @@ describe('Figure Routes Integration', () => {
         manufacturer: 'Good Smile Company',
         name: 'Hatsune Miku',
         scale: '1/8',
-        location: 'Shelf A',
-        boxNumber: 'Box 1'
       };
 
       const response = await request(app)
@@ -327,8 +325,6 @@ describe('Figure Routes Integration', () => {
           manufacturer: 'Good Smile Company',
           name: 'Hatsune Miku',
           scale: '1/8',
-          location: 'Shelf A',
-          boxNumber: 'Box 1',
           userId: testUser._id.toString()
         })
       });
@@ -682,13 +678,11 @@ describe('Figure Routes Integration', () => {
         {
           manufacturer: 'Good Smile Company',
           name: 'Hatsune Miku',
-          location: 'Shelf A',
           userId: testUser._id
         },
         {
           manufacturer: 'Alter',
           name: 'Kagamine Rin',
-          location: 'Shelf B',
           userId: testUser._id
         }
       ];
@@ -725,13 +719,13 @@ describe('Figure Routes Integration', () => {
         {
           manufacturer: 'Good Smile Company',
           name: 'Hatsune Miku Magical Version',
-          location: 'Shelf A',
+
           userId: testUser._id
         },
         {
           manufacturer: 'Max Factory',
           name: 'Miku Racing Version',
-          location: 'Shelf B',
+
           userId: testUser._id
         }
       ]);
@@ -770,19 +764,19 @@ describe('Figure Routes Integration', () => {
         {
           manufacturer: 'Good Smile Company',
           name: 'Hatsune Miku',
-          location: 'Shelf A',
+
           userId: testUser._id
         },
         {
           manufacturer: 'Good Smile Company', 
           name: 'Kagamine Rin Miku Style',
-          location: 'Shelf B',
+
           userId: testUser._id
         },
         {
           manufacturer: 'Max Factory',
           name: 'Racing Miku',
-          location: 'Display',
+
           userId: testUser._id
         }
       ]);
@@ -812,21 +806,21 @@ describe('Figure Routes Integration', () => {
           manufacturer: 'Good Smile Company',
           name: 'Hatsune Miku',
           scale: '1/8',
-          location: 'Shelf A',
+
           userId: testUser._id
         },
         {
           manufacturer: 'Alter',
           name: 'Kagamine Rin',
           scale: '1/7',
-          location: 'Shelf B',
+
           userId: testUser._id
         },
         {
           manufacturer: 'Good Smile Company',
           name: 'Megumin',
           scale: '1/8',
-          location: 'Shelf A',
+
           userId: testUser._id
         }
       ];
@@ -858,17 +852,13 @@ describe('Figure Routes Integration', () => {
       expect(response.body.data.every((fig: any) => fig.scale === '1/8')).toBe(true);
     });
 
-    it('should filter figures by location', async () => {
+    it('should filter figures by origin', async () => {
       const response = await request(app)
-        .get('/figures/filter?location=Shelf A')
+        .get('/figures/filter?origin=Vocaloid')
         .set('Authorization', `Bearer ${authToken}`)
         .expect(200);
 
       expect(response.body.success).toBe(true);
-      expect(response.body.total).toBe(2);
-      expect(response.body.data.every((fig: any) => 
-        fig.location.includes('Shelf A')
-      )).toBe(true);
     });
 
     it('should combine multiple filters', async () => {
@@ -890,14 +880,12 @@ describe('Figure Routes Integration', () => {
           manufacturer: 'Max Factory',
           name: 'Unique Figure 1',
           scale: '1/8',
-          location: 'Shelf C',
           userId: testUser._id
         },
         {
           manufacturer: 'Max Factory',
           name: 'Unique Figure 2',
           scale: '1/6',
-          location: 'Shelf D',
           userId: testUser._id
         }
       ]);
@@ -909,15 +897,10 @@ describe('Figure Routes Integration', () => {
           expectedName: 'Unique Figure 1'
         },
         {
-          query: '/figures/filter?manufacturer=Max Factory&location=Shelf D',
+          query: '/figures/filter?manufacturer=Max Factory&scale=1/6',
           expectedTotal: 1,
           expectedName: 'Unique Figure 2'
         },
-        {
-          query: '/figures/filter?location=Shelf%20A&scale=1/8',
-          expectedTotal: 2,
-          expectedNames: ['Hatsune Miku', 'Megumin']
-        }
       ];
 
       for (const scenario of filterScenarios) {
@@ -942,7 +925,7 @@ describe('Figure Routes Integration', () => {
       const noMatchScenarios = [
         '/figures/filter?manufacturer=Non-Existent Manufacturer',
         '/figures/filter?scale=1/12',
-        '/figures/filter?location=Non-Existent Location'
+        '/figures/filter?origin=Non-Existent Origin'
       ];
 
       for (const query of noMatchScenarios) {
@@ -1072,21 +1055,18 @@ describe('Figure Routes Integration', () => {
         {
           manufacturer: 'Good Smile Company',
           scale: '1/8',
-          location: 'Shelf A',
           name: 'Figure 1',
           userId: testUser._id
         },
         {
           manufacturer: 'Good Smile Company',
           scale: '1/8',
-          location: 'Shelf B',
           name: 'Figure 2',
           userId: testUser._id
         },
         {
           manufacturer: 'Alter',
           scale: '1/7',
-          location: 'Shelf A',
           name: 'Figure 3',
           userId: testUser._id
         }
@@ -1113,10 +1093,8 @@ describe('Figure Routes Integration', () => {
             { _id: '1/8', count: 2 },
             { _id: '1/7', count: 1 }
           ]),
-          locationStats: expect.arrayContaining([
-            { _id: 'Shelf A', count: 2 },
-            { _id: 'Shelf B', count: 1 }
-          ])
+          tagStats: expect.any(Array),
+          tagGroupStats: expect.any(Array),
         })
       });
     });

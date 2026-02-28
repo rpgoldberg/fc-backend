@@ -113,12 +113,50 @@ describe('Sync Routes - Phase Change Webhook', () => {
       expect(job?.items[1].isNsfw).toBe(true);
     });
 
-    it('should ignore terminal phases from scraper', async () => {
+    it('should accept completed phase from scraper when job has no items (lists-only sync)', async () => {
+      await SyncJob.create({
+        userId: testUserId,
+        sessionId: testSessionId,
+        phase: 'queueing',
+        items: []
+      });
+
+      const webhookBody = {
+        sessionId: testSessionId,
+        phase: 'completed',
+        message: 'Sync complete: 7 lists synced, no figures to enrich'
+      };
+
+      const signature = generateWebhookSignature(webhookBody);
+
+      const response = await request(app)
+        .post('/sync/webhook/phase-change')
+        .set('x-webhook-signature', signature)
+        .send(webhookBody)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.ignored).toBeUndefined();
+
+      // Verify job phase WAS changed to completed
+      const job = await SyncJob.findOne({ sessionId: testSessionId });
+      expect(job?.phase).toBe('completed');
+      expect(job?.message).toBe('Sync complete: 7 lists synced, no figures to enrich');
+    });
+
+    it('should ignore completed phase from scraper when job has items', async () => {
       await SyncJob.create({
         userId: testUserId,
         sessionId: testSessionId,
         phase: 'enriching',
-        items: []
+        items: [{
+          mfcId: '12345',
+          name: 'Test Figure',
+          status: 'pending',
+          collectionStatus: 'owned',
+          isNsfw: false,
+          retryCount: 0
+        }]
       });
 
       const webhookBody = {

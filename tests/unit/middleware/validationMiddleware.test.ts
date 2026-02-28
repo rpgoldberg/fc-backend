@@ -262,9 +262,7 @@ describe('Validation Middleware', () => {
           name: 'Detailed Figure',
           manufacturer: 'Test Manufacturer',
           type: 'action figure',
-          boxNumber: 'ABC123',
           description: 'A detailed collectible',
-          location: 'Display Case',
           purchaseInfo: {
             price: 49.99,
             date: new Date(),
