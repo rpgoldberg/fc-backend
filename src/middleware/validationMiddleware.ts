@@ -249,6 +249,7 @@ export const schemas = {
       currency: Joi.string().max(10).allow('').optional(),
       jan: Joi.string().max(15).allow('').optional(),
       isRerelease: Joi.boolean().optional(),
+      variant: Joi.string().max(200).allow('').optional(),
     })).optional(),
 
     // Release info (flat form fields mapped to releases array)
@@ -368,6 +369,7 @@ export const schemas = {
       currency: Joi.string().max(10).allow('').optional(),
       jan: Joi.string().max(15).allow('').optional(),
       isRerelease: Joi.boolean().optional(),
+      variant: Joi.string().max(200).allow('').optional(),
     })).optional(),
 
     // Release info (flat form fields - legacy)
