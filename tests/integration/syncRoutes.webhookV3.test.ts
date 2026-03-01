@@ -190,6 +190,168 @@ describe('Sync Routes - Webhook v3 MFC Fields', () => {
     }
   });
 
+  it('should parse and map dimensions string "1/6, H=260mm" to Figure', async () => {
+    await SyncJob.create({
+      userId: testUserId,
+      sessionId: testSessionId,
+      phase: 'enriching',
+      items: [
+        {
+          mfcId: '90010',
+          name: 'Dimensions Full',
+          status: 'processing',
+          collectionStatus: 'owned',
+          retryCount: 0
+        }
+      ]
+    });
+
+    const webhookBody = {
+      sessionId: testSessionId,
+      mfcId: '90010',
+      status: 'completed',
+      scrapedData: {
+        name: 'Dimension Test Figure',
+        dimensions: '1/6, H=260mm'
+      }
+    };
+
+    const signature = generateWebhookSignature(webhookBody);
+
+    await request(app)
+      .post('/sync/webhook/item-complete')
+      .set('x-webhook-signature', signature)
+      .send(webhookBody)
+      .expect(200);
+
+    const figure = await Figure.findOne({ userId: testUserId, mfcId: 90010 });
+    expect(figure).toBeTruthy();
+    expect(figure?.dimensions).toBeTruthy();
+    expect(figure?.dimensions?.heightMm).toBe(260);
+    expect(figure?.dimensions?.scaledHeight).toBe('1/6');
+  });
+
+  it('should parse dimensions string "H=260mm" (height only) to Figure', async () => {
+    await SyncJob.create({
+      userId: testUserId,
+      sessionId: testSessionId,
+      phase: 'enriching',
+      items: [
+        {
+          mfcId: '90011',
+          name: 'Dimensions Height Only',
+          status: 'processing',
+          collectionStatus: 'owned',
+          retryCount: 0
+        }
+      ]
+    });
+
+    const webhookBody = {
+      sessionId: testSessionId,
+      mfcId: '90011',
+      status: 'completed',
+      scrapedData: {
+        name: 'Height Only Figure',
+        dimensions: 'H=260mm'
+      }
+    };
+
+    const signature = generateWebhookSignature(webhookBody);
+
+    await request(app)
+      .post('/sync/webhook/item-complete')
+      .set('x-webhook-signature', signature)
+      .send(webhookBody)
+      .expect(200);
+
+    const figure = await Figure.findOne({ userId: testUserId, mfcId: 90011 });
+    expect(figure).toBeTruthy();
+    expect(figure?.dimensions).toBeTruthy();
+    expect(figure?.dimensions?.heightMm).toBe(260);
+    expect(figure?.dimensions?.scaledHeight).toBeUndefined();
+  });
+
+  it('should parse dimensions string "1/7" (scale only) to Figure', async () => {
+    await SyncJob.create({
+      userId: testUserId,
+      sessionId: testSessionId,
+      phase: 'enriching',
+      items: [
+        {
+          mfcId: '90012',
+          name: 'Dimensions Scale Only',
+          status: 'processing',
+          collectionStatus: 'owned',
+          retryCount: 0
+        }
+      ]
+    });
+
+    const webhookBody = {
+      sessionId: testSessionId,
+      mfcId: '90012',
+      status: 'completed',
+      scrapedData: {
+        name: 'Scale Only Figure',
+        dimensions: '1/7'
+      }
+    };
+
+    const signature = generateWebhookSignature(webhookBody);
+
+    await request(app)
+      .post('/sync/webhook/item-complete')
+      .set('x-webhook-signature', signature)
+      .send(webhookBody)
+      .expect(200);
+
+    const figure = await Figure.findOne({ userId: testUserId, mfcId: 90012 });
+    expect(figure).toBeTruthy();
+    expect(figure?.dimensions).toBeTruthy();
+    expect(figure?.dimensions?.scaledHeight).toBe('1/7');
+    expect(figure?.dimensions?.heightMm).toBeUndefined();
+  });
+
+  it('should not set dimensions when scrapedData.dimensions is absent', async () => {
+    await SyncJob.create({
+      userId: testUserId,
+      sessionId: testSessionId,
+      phase: 'enriching',
+      items: [
+        {
+          mfcId: '90013',
+          name: 'No Dimensions',
+          status: 'processing',
+          collectionStatus: 'owned',
+          retryCount: 0
+        }
+      ]
+    });
+
+    const webhookBody = {
+      sessionId: testSessionId,
+      mfcId: '90013',
+      status: 'completed',
+      scrapedData: {
+        name: 'No Dimensions Figure'
+        // No dimensions field
+      }
+    };
+
+    const signature = generateWebhookSignature(webhookBody);
+
+    await request(app)
+      .post('/sync/webhook/item-complete')
+      .set('x-webhook-signature', signature)
+      .send(webhookBody)
+      .expect(200);
+
+    const figure = await Figure.findOne({ userId: testUserId, mfcId: 90013 });
+    expect(figure).toBeTruthy();
+    expect(figure?.dimensions).toBeUndefined();
+  });
+
   it('should handle webhook processing error gracefully', async () => {
     // Don't create a SyncJob but use valid signature - the findOne+updateItemStatus chain should break
     // Actually let's trigger a generic error by making SyncJob.findOne throw

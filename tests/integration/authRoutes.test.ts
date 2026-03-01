@@ -613,6 +613,10 @@ describe('Auth Routes Integration', () => {
         email: 'profile@example.com',
         isAdmin: false,
         colorProfile: 'dark',
+        emailVerified: false,
+        twoFactorEnabled: false,
+        webauthnCredentialCount: 0,
+        webauthnCredentials: [],
         createdAt: expect.any(String),
         updatedAt: expect.any(String)
       });

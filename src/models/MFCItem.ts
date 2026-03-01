@@ -29,6 +29,8 @@ export interface ICommunityStats {
   ownedCount?: number;
   wishedCount?: number;
   orderedCount?: number;
+  listedInCount?: number;
+  averageScore?: number;
 }
 
 /**
@@ -36,8 +38,9 @@ export interface ICommunityStats {
  */
 export interface IRelatedItem {
   mfcId: number;
-  relationTypeId: mongoose.Types.ObjectId;
+  relationType?: string;
   name?: string;
+  imageUrl?: string;
 }
 
 /**
@@ -126,7 +129,9 @@ const CommunityStatsSchema = new Schema<ICommunityStats>(
   {
     ownedCount: { type: Number },
     wishedCount: { type: Number },
-    orderedCount: { type: Number }
+    orderedCount: { type: Number },
+    listedInCount: { type: Number },
+    averageScore: { type: Number },
   },
   { _id: false }
 );
@@ -134,8 +139,9 @@ const CommunityStatsSchema = new Schema<ICommunityStats>(
 const RelatedItemSchema = new Schema<IRelatedItem>(
   {
     mfcId: { type: Number, required: true },
-    relationTypeId: { type: Schema.Types.ObjectId, ref: 'RoleType', required: true },
-    name: { type: String }
+    relationType: { type: String },
+    name: { type: String },
+    imageUrl: { type: String },
   },
   { _id: false }
 );

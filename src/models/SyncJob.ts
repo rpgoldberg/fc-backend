@@ -7,6 +7,7 @@ export type SyncPhase =
   | 'validating'      // Validating MFC session cookies
   | 'exporting'       // Exporting CSV from MFC
   | 'parsing'         // Parsing CSV content
+  | 'fetching_activity_order' // Capturing collection activity ordering
   | 'fetching_lists'  // Fetching user lists from MFC
   | 'queueing'        // Adding items to scrape queue
   | 'enriching'       // Background enrichment in progress
@@ -33,7 +34,9 @@ export interface ISyncItem {
   name?: string;
   status: SyncItemStatus;
   collectionStatus: 'owned' | 'wished' | 'ordered';
+  mfcActivityOrder?: number;
   isNsfw?: boolean;
+  isOrphan?: boolean;
   error?: string;
   retryCount: number;
   completedAt?: Date;
@@ -109,7 +112,9 @@ const SyncItemSchema = new Schema<ISyncItem>(
       enum: ['owned', 'wished', 'ordered'],
       required: true
     },
+    mfcActivityOrder: { type: Number },
     isNsfw: { type: Boolean, default: false },
+    isOrphan: { type: Boolean, default: false },
     error: { type: String },
     retryCount: { type: Number, default: 0 },
     completedAt: { type: Date }
@@ -144,7 +149,7 @@ const SyncJobSchema = new Schema<ISyncJob>(
     },
     phase: {
       type: String,
-      enum: ['validating', 'exporting', 'parsing', 'fetching_lists', 'queueing', 'enriching', 'completed', 'failed', 'cancelled'],
+      enum: ['validating', 'exporting', 'parsing', 'fetching_activity_order', 'fetching_lists', 'queueing', 'enriching', 'completed', 'failed', 'cancelled'],
       default: 'validating',
       index: true
     },

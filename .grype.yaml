@@ -1,0 +1,42 @@
+# Grype vulnerability scanning configuration
+# See: https://github.com/anchore/grype#specifying-matches-to-ignore
+
+ignore:
+  # minimatch 10.2.x ReDoS vulnerabilities (GHSA-7r86-cg39-jmmj, GHSA-23c5-xmqv-rm74)
+  # The backend has NO minimatch 10.x in production dependencies (npm ls minimatch --omit=dev is empty).
+  # If grype detects minimatch 10.2.2, it is from the globally installed npm CLI (npm install -g npm@latest),
+  # not from application code. npm's minimatch is only used during package installation, not at runtime.
+  # The application does not process untrusted glob patterns through minimatch.
+  - vulnerability: GHSA-7r86-cg39-jmmj
+    package:
+      name: minimatch
+      type: npm
+    reason: |
+      Not in production dependencies. Any finding is from npm CLI internals (global install),
+      not application code. No untrusted glob patterns are processed at runtime.
+  - vulnerability: GHSA-23c5-xmqv-rm74
+    package:
+      name: minimatch
+      type: npm
+    reason: |
+      Not in production dependencies. Any finding is from npm CLI internals (global install),
+      not application code. No untrusted glob patterns are processed at runtime.
+
+  # Alpine base image CVEs with no fix available
+  # These are in the node:25-alpine base image packages. No patched versions exist yet.
+  # Risk is mitigated by: non-root user, network isolation, no untrusted input to affected components.
+
+  # busybox CVE-2025-60876 (Medium) - affects busybox, busybox-binsh, ssl_client
+  # No fix available in Alpine repositories as of 2026-02-28.
+  - vulnerability: CVE-2025-60876
+    reason: |
+      Alpine base image (node:25-alpine) package with no fix available.
+      Application runs as non-root user with limited busybox usage.
+
+  # zlib CVE-2026-27171 (Medium) - affects zlib 1.3.1-r2
+  # No fix available in Alpine repositories as of 2026-02-28.
+  - vulnerability: CVE-2026-27171
+    reason: |
+      Alpine base image (node:25-alpine) package with no fix available.
+      zlib is used internally by Node.js for HTTP compression.
+      Application is not directly exposed to untrusted compressed data.

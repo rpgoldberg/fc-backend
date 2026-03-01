@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import mongoose from 'mongoose';
+import { MFC_LIST_LIMITS } from '../models/MfcList';
 
 export const validateRequest = (schema: Joi.ObjectSchema, source: 'body' | 'query' = 'body') => {
   return (req: Request, res: Response, next: NextFunction): void | Response => {
@@ -99,9 +100,7 @@ export const schemas = {
     // Schema v3: manufacturer optional when companyRoles present
     manufacturer: Joi.string().trim().min(2).max(100).optional().allow(''),
     type: Joi.string().valid('action figure', 'statue', 'collectible').default('action figure'),
-    boxNumber: Joi.string().allow('').max(50).optional(),
     description: Joi.string().allow('').max(1000).optional(),
-    location: Joi.string().trim().max(100).allow('').optional(),
     scale: Joi.string().optional(),
     purchaseInfo: Joi.object({
       price: Joi.number().min(0).precision(2).optional(),
@@ -166,7 +165,8 @@ export const schemas = {
         Joi.string().trim().pattern(/^\d+$/).optional()
       ).optional(),
     sortBy: Joi.string()
-      .valid('createdAt', 'updatedAt', 'name', 'manufacturer', 'scale')
+      .valid('createdAt', 'updatedAt', 'name', 'manufacturer', 'scale', 'activity')
+      .insensitive()
       .default('createdAt')
       .optional(),
     sortOrder: Joi.string()
@@ -203,9 +203,6 @@ export const schemas = {
         })
     }),
     scale: Joi.string().allow('').max(50).optional(),
-    location: Joi.string().trim().max(100).allow('').optional(),
-    storageDetail: Joi.string().trim().max(100).allow('').optional(),
-    boxNumber: Joi.string().allow('').max(50).optional(), // Legacy alias
     imageUrl: Joi.string().uri().allow('').optional(),
 
     // MFC integration - accept full URL or just item ID (e.g., "287844")
@@ -326,9 +323,6 @@ export const schemas = {
     name: Joi.string().trim().max(200).allow('').optional(),
     manufacturer: Joi.string().trim().max(100).allow('').optional(),
     scale: Joi.string().allow('').max(50).optional(),
-    location: Joi.string().trim().max(100).allow('').optional(),
-    storageDetail: Joi.string().trim().max(100).allow('').optional(),
-    boxNumber: Joi.string().allow('').max(50).optional(),
     imageUrl: Joi.string().uri().allow('').optional(),
 
     // MFC integration - accept full URL or just item ID (e.g., "287844")
@@ -468,7 +462,7 @@ export const schemas = {
   // Search validation schema
   search: Joi.object({
     query: Joi.string().min(1).max(100).required(),
-    fields: Joi.array().items(Joi.string().valid('name', 'manufacturer', 'location', 'boxNumber')).optional(),
+    fields: Joi.array().items(Joi.string().valid('name', 'manufacturer', 'origin', 'category')).optional(),
     page: Joi.alternatives()
       .try(
         Joi.number().integer().min(1).max(1000).default(1),
@@ -488,12 +482,15 @@ export const schemas = {
     distributor: Joi.string().min(1).max(500).optional(),
     type: Joi.string().valid('action figure', 'statue', 'collectible').optional(),
     scale: Joi.string().min(1).max(200).optional(),
-    location: Joi.string().min(1).max(500).optional(),
     origin: Joi.string().min(1).max(500).optional(),
     category: Joi.string().min(1).max(500).optional(),
-    boxNumber: Joi.string().min(1).max(50).optional(),
+    tag: Joi.string().min(1).max(100).optional(),
+    tagGroup: Joi.string().min(1).max(50).optional(),
+    sculptor: Joi.string().min(1).max(500).optional(),
+    illustrator: Joi.string().min(1).max(500).optional(),
+    classification: Joi.string().min(1).max(500).optional(),
     status: Joi.string().valid('owned', 'ordered', 'wished').optional(),
-    sortBy: Joi.string().valid('createdAt', 'updatedAt', 'name', 'manufacturer', 'paidPrice').optional(),
+    sortBy: Joi.string().valid('createdAt', 'updatedAt', 'name', 'manufacturer', 'scale', 'activity').insensitive().optional(),
     sortOrder: Joi.string().valid('asc', 'desc').optional(),
     page: Joi.alternatives()
       .try(
@@ -505,6 +502,99 @@ export const schemas = {
         Joi.number().integer().min(1).max(100).default(10),
         Joi.string().trim().pattern(/^\d+$/).min(1).max(3).default('10')
       ).default(10)
+  }),
+
+  // List validation schemas — limits match MFC edit form to prevent round-trip data loss
+  listCreate: Joi.object({
+    mfcId: Joi.number().integer().required()
+      .messages({ 'any.required': 'mfcId is required' }),
+    name: Joi.string().trim().min(1).max(MFC_LIST_LIMITS.NAME_MAX).required()
+      .messages({
+        'any.required': 'name is required',
+        'string.empty': 'name is required'
+      }),
+    teaser: Joi.string().trim().max(MFC_LIST_LIMITS.TEASER_MAX).allow('').optional(),
+    description: Joi.string().allow('').optional(),
+    privacy: Joi.string().valid('public', 'friends', 'private').optional(),
+    iconUrl: Joi.string().allow('').optional(),
+    allowComments: Joi.boolean().optional(),
+    mailOnSales: Joi.boolean().optional(),
+    mailOnHunts: Joi.boolean().optional(),
+    itemMfcIds: Joi.array().items(Joi.number().integer()).optional(),
+    mfcCreatedAt: Joi.date().optional(),
+    mfcLastEditedAt: Joi.date().optional(),
+    lastSyncedAt: Joi.date().optional()
+  }),
+
+  listUpdate: Joi.object({
+    name: Joi.string().trim().min(1).max(MFC_LIST_LIMITS.NAME_MAX).optional(),
+    teaser: Joi.string().trim().max(MFC_LIST_LIMITS.TEASER_MAX).allow('').optional(),
+    description: Joi.string().allow('').optional(),
+    privacy: Joi.string().valid('public', 'friends', 'private').optional(),
+    iconUrl: Joi.string().allow('').optional(),
+    allowComments: Joi.boolean().optional(),
+    mailOnSales: Joi.boolean().optional(),
+    mailOnHunts: Joi.boolean().optional(),
+    itemMfcIds: Joi.array().items(Joi.number().integer()).optional(),
+    mfcCreatedAt: Joi.date().optional(),
+    mfcLastEditedAt: Joi.date().optional(),
+    lastSyncedAt: Joi.date().optional()
+  }).min(1),
+
+  // Auth modernization schemas
+  verifyEmail: Joi.object({
+    token: Joi.string().required(),
+    userId: Joi.string().required()
+  }),
+
+  resendVerification: Joi.object({
+    email: Joi.string().trim().email().required()
+  }),
+
+  forgotPassword: Joi.object({
+    email: Joi.string().trim().email().required()
+  }),
+
+  resetPassword: Joi.object({
+    token: Joi.string().required(),
+    password: Joi.string().min(6).max(100).required(),
+    userId: Joi.string().required()
+  }),
+
+  verify2FA: Joi.object({
+    sessionId: Joi.string().required(),
+    method: Joi.string().valid('totp', 'backup', 'webauthn').required(),
+    code: Joi.string().required()
+  }),
+
+  totpVerifySetup: Joi.object({
+    code: Joi.string().length(6).pattern(/^\d+$/).required()
+  }),
+
+  totpDisable: Joi.object({
+    code: Joi.string().length(6).pattern(/^\d+$/).required()
+  }),
+
+  regenerateBackupCodes: Joi.object({
+    code: Joi.string().length(6).pattern(/^\d+$/).required()
+  }),
+
+  webauthnRegisterOptions: Joi.object({
+    nickname: Joi.string().max(50).optional()
+  }),
+
+  webauthnRegisterVerify: Joi.object({
+    challengeId: Joi.string().required(),
+    response: Joi.object().required()
+  }),
+
+  webauthnLoginOptions: Joi.object({
+    email: Joi.string().trim().email().optional()
+  }),
+
+  webauthnLoginVerify: Joi.object({
+    challengeId: Joi.string().required(),
+    response: Joi.object().required()
   })
 };
 
@@ -528,7 +618,7 @@ export const validateContentType = (allowedTypes: string[]) => {
 // SECURITY FIX: MongoDB ObjectId validation middleware
 export const validateObjectId = (paramName: string = 'id') => {
   return (req: Request, res: Response, next: NextFunction): void | Response => {
-    const id = req.params[paramName];
+    const id = req.params[paramName] as string | undefined;
     
     if (!id) {
       return res.status(422).json({

@@ -127,7 +127,7 @@ export const getAllConfigs = async (req: Request, res: Response): Promise<Respon
  */
 export const getConfig = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const { key } = req.params;
+    const key = req.params.key as string;
 
     const config = await SystemConfig.findOne({ key }).select('-__v');
     if (!config) {
@@ -158,7 +158,7 @@ export const getConfig = async (req: Request, res: Response): Promise<Response> 
  */
 export const upsertConfig = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const { key } = req.params;
+    const key = req.params.key as string;
     const { value, type, description, isPublic } = req.body;
 
     // Validate key format
@@ -238,7 +238,7 @@ export const upsertConfig = async (req: Request, res: Response): Promise<Respons
  */
 export const deleteConfig = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const { key } = req.params;
+    const key = req.params.key as string;
 
     const config = await SystemConfig.findOneAndDelete({ key });
     if (!config) {
@@ -270,7 +270,7 @@ export const deleteConfig = async (req: Request, res: Response): Promise<Respons
  */
 export const getPublicConfig = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const { key } = req.params;
+    const key = req.params.key as string;
 
     const config = await SystemConfig.findOne({ key, isPublic: true })
       .select('key value type description updatedAt');

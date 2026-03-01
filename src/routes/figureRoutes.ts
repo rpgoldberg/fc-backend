@@ -7,10 +7,10 @@ import {
   createFigure,
   updateFigure,
   deleteFigure,
-  searchFigures,
   filterFigures,
-  getFigureStats
 } from '../controllers/figureController';
+import { searchFigures, publicSearchFigures } from '../controllers/searchController';
+import { getFigureStats } from '../controllers/statsController';
 import { protect } from '../middleware/authMiddleware';
 import {
   validateRequest,
@@ -44,8 +44,19 @@ const scrapeLimiter = rateLimit({
   skip: () => isTestEnv,
 });
 
+// Public search rate limiter (stricter than authenticated)
+const publicSearchLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: isTestEnv ? 0 : 30,
+  message: { success: false, message: 'Too many search requests, please try again later' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => isTestEnv,
+});
+
 // Public routes (no authentication required)
 router.post('/scrape-mfc', scrapeLimiter, scrapeMFCData);
+router.get('/public/search', publicSearchLimiter, publicSearchFigures);
 
 // Apply rate limiting to all protected routes
 router.use(figureApiLimiter);
@@ -57,15 +68,15 @@ router.route('/')
   .get(validateRequest(schemas.pagination, 'query'), getFigures)
   .post(
     validateContentType(['application/json']),
-    validateRequest(schemas.figureCreate), 
+    validateRequest(schemas.figureCreate),
     createFigure
   );
 
-router.get('/search', 
+router.get('/search',
   searchFigures
 );
-router.get('/filter', 
-  validateRequest(schemas.filter, 'query'), 
+router.get('/filter',
+  validateRequest(schemas.filter, 'query'),
   filterFigures
 );
 router.get('/stats', getFigureStats);
@@ -75,7 +86,7 @@ router.route('/:id')
   .put(
     validateObjectId(),
     validateContentType(['application/json']),
-    validateRequest(schemas.figureUpdate), 
+    validateRequest(schemas.figureUpdate),
     updateFigure
   )
   .delete(validateObjectId(), deleteFigure);

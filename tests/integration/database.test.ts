@@ -183,15 +183,12 @@ describe('Database Integration Tests', () => {
       const figures = [];
       const manufacturers = ['GSC', 'Alter', 'Max Factory'];
       const names = ['Miku', 'Rin', 'Len', 'Luka'];
-      const locations = ['Shelf A', 'Shelf B', 'Box 1', 'Box 2'];
 
       for (let i = 0; i < 20; i++) {
         figures.push({
           manufacturer: manufacturers[i % manufacturers.length],
           name: names[i % names.length] + ` ${i}`,
           scale: i % 2 === 0 ? '1/8' : '1/7',
-          location: locations[i % locations.length],
-          boxNumber: `Box ${Math.floor(i / 4) + 1}`,
           userId: testUser._id
         });
       }
@@ -204,13 +201,6 @@ describe('Database Integration Tests', () => {
         name: { $regex: 'Miku' }
       });
       expect(manufacturerQuery.length).toBeGreaterThan(0);
-
-      // Test compound index on location + boxNumber
-      const locationQuery = await Figure.find({
-        location: 'Shelf A',
-        boxNumber: 'Box 1'
-      });
-      expect(locationQuery.length).toBeGreaterThan(0);
 
       // Test individual indexed fields
       const manufacturerOnlyQuery = await Figure.find({ manufacturer: 'Alter' });
@@ -486,8 +476,6 @@ describe('Database Integration Tests', () => {
           manufacturer: `Manufacturer ${i % 10}`,
           name: `Figure ${i}`,
           scale: i % 3 === 0 ? '1/8' : i % 3 === 1 ? '1/7' : '1/6',
-          location: `Shelf ${String.fromCharCode(65 + (i % 5))}`, // A-E
-          boxNumber: `Box ${Math.floor(i / 10) + 1}`,
           userId: testUser._id
         });
       }

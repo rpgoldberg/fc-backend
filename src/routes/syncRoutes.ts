@@ -13,9 +13,11 @@ import express, { Response } from 'express';
 import crypto from 'crypto';
 import { protect } from '../middleware/authMiddleware';
 import rateLimit from 'express-rate-limit';
-import { SyncJob, ISyncJob, SyncItemStatus, Figure, Company, Artist, RoleType } from '../models';
+import { SyncJob, ISyncJob, SyncItemStatus, Figure, Company, Artist, RoleType, MfcList, MFCItem } from '../models';
 import mongoose from 'mongoose';
 import { syncLogger } from '../utils/logger';
+import { upsertFigureSearchIndex } from '../services/searchIndexService';
+import { parseDimensionsString } from '../utils/parseDimensions';
 
 // Interface for scraped company/artist data from scraper
 interface IScrapedCompany {
@@ -509,71 +511,123 @@ router.post('/webhook/item-complete', async (req, res) => {
     // Update item status
     await job.updateItemStatus(mfcId, status, itemError);
 
-    // If item completed successfully and has scraped data, save/update Figure
+    // If item completed successfully and has scraped data, save/update records
     if (status === 'completed' && scrapedData) {
       try {
-        // Get the item from the job to find its collection status
+        // Get the item from the job to find its collection status, activity order, and orphan flag
         const jobItem = job.items.find((i: { mfcId: string }) => i.mfcId === mfcId);
-        const collectionStatus = jobItem?.collectionStatus || 'owned';
 
-        // Map scraped data to Figure schema
-        const figureData: Record<string, unknown> = {
-          mfcId: parseInt(mfcId, 10),
-          mfcLink: `https://myfigurecollection.net/item/${mfcId}`,
-          collectionStatus,
-        };
-        // Add optional fields from scraped data
-        if (scrapedData.name) figureData.name = scrapedData.name;
-        if (scrapedData.manufacturer) figureData.manufacturer = scrapedData.manufacturer;
-        if (scrapedData.scale) figureData.scale = scrapedData.scale;
-        if (scrapedData.imageUrl) figureData.imageUrl = scrapedData.imageUrl;
-        if (scrapedData.description) figureData.description = scrapedData.description;
-        if (scrapedData.releases) figureData.releases = scrapedData.releases;
-        if (scrapedData.jan) figureData.jan = scrapedData.jan;
+        // Orphan items (from lists, not in collection) only get MFCItem catalog enrichment.
+        // They do NOT get a user-specific Figure record.
+        if (!jobItem?.isOrphan) {
+          const collectionStatus = jobItem?.collectionStatus || 'owned';
 
-        // Schema v3: Individual MFC fields
-        if (scrapedData.mfcTitle) figureData.mfcTitle = scrapedData.mfcTitle;
-        if (scrapedData.origin) figureData.origin = scrapedData.origin;
-        if (scrapedData.version) figureData.version = scrapedData.version;
-        if (scrapedData.category) figureData.category = scrapedData.category;
-        if (scrapedData.classification) figureData.classification = scrapedData.classification;
-        if (scrapedData.materials) figureData.materials = scrapedData.materials;
-        if (scrapedData.tags && Array.isArray(scrapedData.tags)) {
-          figureData.tags = scrapedData.tags;
-        }
+          // Map scraped data to Figure schema
+          const figureData: Record<string, unknown> = {
+            mfcId: parseInt(mfcId, 10),
+            mfcLink: `https://myfigurecollection.net/item/${mfcId}`,
+            collectionStatus,
+          };
 
-        // Schema v3: Process companies with roles
-        if (scrapedData.companies && Array.isArray(scrapedData.companies) && scrapedData.companies.length > 0) {
-          const { companyRoles, manufacturer } = await processScrapedCompanies(
-            scrapedData.companies as IScrapedCompany[]
-          );
-          figureData.companyRoles = companyRoles;
-
-          // Set legacy manufacturer from companies if not already set
-          if (!figureData.manufacturer && manufacturer) {
-            figureData.manufacturer = manufacturer;
+          // Activity ordering from MFC collection page sort
+          if (jobItem?.mfcActivityOrder !== undefined) {
+            figureData.mfcActivityOrder = jobItem.mfcActivityOrder;
           }
-          console.log(`[WEBHOOK] Processed ${companyRoles.length} company roles for ${JSON.stringify(mfcId)}`);
-        }
+          // Add optional fields from scraped data
+          if (scrapedData.name) figureData.name = scrapedData.name;
+          if (scrapedData.manufacturer) figureData.manufacturer = scrapedData.manufacturer;
+          if (scrapedData.scale) figureData.scale = scrapedData.scale;
+          if (scrapedData.imageUrl) figureData.imageUrl = scrapedData.imageUrl;
+          if (scrapedData.description) figureData.description = scrapedData.description;
+          if (scrapedData.releases) figureData.releases = scrapedData.releases;
+          if (scrapedData.jan) figureData.jan = scrapedData.jan;
 
-        // Schema v3: Process artists with roles
-        if (scrapedData.artists && Array.isArray(scrapedData.artists) && scrapedData.artists.length > 0) {
-          const artistRoles = await processScrapedArtists(
-            scrapedData.artists as IScrapedArtist[]
+          // Schema v3: Individual MFC fields
+          if (scrapedData.mfcTitle) figureData.mfcTitle = scrapedData.mfcTitle;
+          if (scrapedData.origin) figureData.origin = scrapedData.origin;
+          if (scrapedData.version) figureData.version = scrapedData.version;
+          if (scrapedData.category) figureData.category = scrapedData.category;
+          if (scrapedData.classification) figureData.classification = scrapedData.classification;
+          if (scrapedData.materials) figureData.materials = scrapedData.materials;
+          if (scrapedData.dimensions && typeof scrapedData.dimensions === 'string') {
+            const parsed = parseDimensionsString(scrapedData.dimensions as string);
+            if (parsed) {
+              figureData.dimensions = parsed;
+            }
+          }
+          if (scrapedData.tags && Array.isArray(scrapedData.tags)) {
+            figureData.tags = scrapedData.tags;
+          }
+
+          // User's personal ratings (only present when logged-in user has the figure)
+          if (scrapedData.userScore && typeof scrapedData.userScore === 'number') {
+            figureData.rating = scrapedData.userScore;
+          }
+          if (scrapedData.userWishRating && typeof scrapedData.userWishRating === 'number') {
+            figureData.wishRating = scrapedData.userWishRating;
+          }
+
+          // Schema v3: Process companies with roles
+          if (scrapedData.companies && Array.isArray(scrapedData.companies) && scrapedData.companies.length > 0) {
+            const { companyRoles, manufacturer } = await processScrapedCompanies(
+              scrapedData.companies as IScrapedCompany[]
+            );
+            figureData.companyRoles = companyRoles;
+
+            // Set legacy manufacturer from companies if not already set
+            if (!figureData.manufacturer && manufacturer) {
+              figureData.manufacturer = manufacturer;
+            }
+            console.log(`[WEBHOOK] Processed ${companyRoles.length} company roles for ${JSON.stringify(mfcId)}`);
+          }
+
+          // Schema v3: Process artists with roles
+          if (scrapedData.artists && Array.isArray(scrapedData.artists) && scrapedData.artists.length > 0) {
+            const artistRoles = await processScrapedArtists(
+              scrapedData.artists as IScrapedArtist[]
+            );
+            figureData.artistRoles = artistRoles;
+            console.log(`[WEBHOOK] Processed ${artistRoles.length} artist roles for ${JSON.stringify(mfcId)}`);
+          }
+
+          // Upsert: Update if exists for this user+mfcId, otherwise create
+          const result = await Figure.findOneAndUpdate(
+            { userId: job.userId, mfcId: parseInt(mfcId, 10) },
+            { $set: figureData, $setOnInsert: { userId: job.userId } },
+            { upsert: true, new: true }
           );
-          figureData.artistRoles = artistRoles;
-          console.log(`[WEBHOOK] Processed ${artistRoles.length} artist roles for ${JSON.stringify(mfcId)}`);
+
+          // Sync search index (fire-and-forget)
+          upsertFigureSearchIndex(result).catch(() => {});
+
+          console.log(`[WEBHOOK] Figure ${JSON.stringify(mfcId)} saved/updated: ${result._id}`);
+          syncLogger.itemSaved(sessionId, mfcId);
+        } else {
+          console.log(`[WEBHOOK] Orphan item ${JSON.stringify(mfcId)} — enriching MFCItem catalog only (no Figure)`);
         }
 
-        // Upsert: Update if exists for this user+mfcId, otherwise create
-        const result = await Figure.findOneAndUpdate(
-          { userId: job.userId, mfcId: parseInt(mfcId, 10) },
-          { $set: figureData, $setOnInsert: { userId: job.userId } },
-          { upsert: true, new: true }
-        );
+        // Upsert shared MFCItem catalog entry — runs for ALL items (collection + orphans)
+        const catalogData: Record<string, unknown> = {
+          mfcId: parseInt(mfcId, 10),
+          mfcUrl: `https://myfigurecollection.net/item/${mfcId}`,
+        };
+        if (scrapedData.name) catalogData.name = scrapedData.name;
+        if (scrapedData.scale) catalogData.scale = scrapedData.scale;
+        if (scrapedData.imageUrl) catalogData.imageUrls = [scrapedData.imageUrl];
+        if (scrapedData.tags) catalogData.tags = scrapedData.tags;
+        if (scrapedData.releases) catalogData.releases = scrapedData.releases;
+        if (scrapedData.companies) catalogData.companies = scrapedData.companies;
+        if (scrapedData.artists) catalogData.artists = scrapedData.artists;
+        if (scrapedData.dimensions) catalogData.dimensions = scrapedData.dimensions;
+        if (scrapedData.communityStats) catalogData.communityStats = scrapedData.communityStats;
+        if (scrapedData.relatedItems) catalogData.relatedItems = scrapedData.relatedItems;
+        catalogData.lastScrapedAt = new Date();
 
-        console.log(`[WEBHOOK] Figure ${JSON.stringify(mfcId)} saved/updated: ${result._id}`);
-        syncLogger.itemSaved(sessionId, mfcId);
+        MFCItem.findOneAndUpdate(
+          { mfcId: parseInt(mfcId, 10) },
+          { $set: catalogData },
+          { upsert: true }
+        ).catch(() => {});
       } catch (saveError: any) {
         console.error(`[WEBHOOK] Failed to save figure ${JSON.stringify(mfcId)}: ${JSON.stringify(saveError.message)}`);
         syncLogger.itemFailed(sessionId, mfcId, 'save_error', saveError.message);
@@ -627,7 +681,7 @@ router.post('/webhook/phase-change', async (req, res) => {
       sessionId: string;
       phase: string;
       message?: string;
-      items?: Array<{ mfcId: string; name?: string; collectionStatus: string; isNsfw?: boolean }>;
+      items?: Array<{ mfcId: string; name?: string; collectionStatus: string; isNsfw?: boolean; mfcActivityOrder?: number; isOrphan?: boolean }>;
     };
 
     if (!sessionId || !phase) {
@@ -644,9 +698,28 @@ router.post('/webhook/phase-change', async (req, res) => {
 
     // Terminal phases (completed, failed, cancelled) should only be set internally
     // by recalculateStats() when all items are done, or by the cancel endpoint.
-    // This prevents the scraper from prematurely marking sync as complete.
+    // Exception: accept 'completed' from scraper when there are no items to enrich
+    // (e.g., lists-only sync where statusFilter is empty).
     const terminalPhases = ['completed', 'failed', 'cancelled'];
     if (terminalPhases.includes(phase)) {
+      const hasNoItems = !job.items || job.items.length === 0;
+      if (phase === 'completed' && hasNoItems) {
+        // No items means recalculateStats() will never trigger completion.
+        // Accept the scraper's completed phase directly.
+        job.phase = 'completed';
+        job.message = message || 'Sync complete';
+        await job.save();
+
+        syncLogger.phaseChange(sessionId, 'completed', 0, 0);
+        broadcastToSession(sessionId, 'sync-complete', {
+          phase: 'completed',
+          message: job.message,
+          stats: job.stats
+        });
+
+        return res.json({ success: true });
+      }
+
       console.warn(`[WEBHOOK] Ignoring terminal phase ${JSON.stringify(phase)} from scraper - completion is determined by backend`);
       return res.json({ success: true, ignored: true });
     }
@@ -662,7 +735,9 @@ router.post('/webhook/phase-change', async (req, res) => {
         name: item.name,
         status: 'pending' as SyncItemStatus,
         collectionStatus: item.collectionStatus as 'owned' | 'wished' | 'ordered',
+        mfcActivityOrder: item.mfcActivityOrder,
         isNsfw: item.isNsfw || false,
+        isOrphan: item.isOrphan || false,
         retryCount: 0
       }));
       job.recalculateStats();
@@ -690,6 +765,84 @@ router.post('/webhook/phase-change', async (req, res) => {
   }
 });
 
+/**
+ * POST /sync/webhook/lists-sync
+ * Webhook called by scraper to sync user's MFC lists.
+ * Upserts lists into MfcList collection using the userId from the SyncJob.
+ */
+router.post('/webhook/lists-sync', async (req, res) => {
+  try {
+    const signature = req.headers['x-webhook-signature'] as string;
+    const rawBody = JSON.stringify(req.body);
+
+    if (!verifyWebhookSignature(signature, rawBody)) {
+      return res.status(401).json({ success: false, message: 'Invalid webhook signature' });
+    }
+
+    const { sessionId, lists } = req.body as {
+      sessionId: string;
+      lists: Array<{
+        mfcId: number;
+        name: string;
+        teaser?: string;
+        description?: string;
+        privacy?: string;
+        iconUrl?: string;
+        itemCount?: number;
+        itemMfcIds?: number[];
+        itemDetails?: Array<{ mfcId: number; name?: string; imageUrl?: string }>;
+        mfcCreatedAt?: string;
+      }>;
+    };
+
+    if (!sessionId || !lists || !Array.isArray(lists)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: sessionId, lists'
+      });
+    }
+
+    // Look up SyncJob to get the userId
+    const job = await SyncJob.findOne({ sessionId });
+    if (!job) {
+      return res.status(404).json({ success: false, message: 'SyncJob not found' });
+    }
+
+    const userId = job.userId;
+    let upsertCount = 0;
+
+    for (const listData of lists) {
+      const { mfcId, ...rest } = listData;
+
+      await MfcList.findOneAndUpdate(
+        { userId, mfcId },
+        {
+          $set: {
+            ...rest,
+            userId,
+            mfcId,
+            itemCount: rest.itemMfcIds ? rest.itemMfcIds.length : (rest.itemCount || 0),
+            lastSyncedAt: new Date()
+          }
+        },
+        { upsert: true, new: true }
+      );
+
+      upsertCount++;
+    }
+
+    console.log(`[WEBHOOK] lists-sync: upserted ${upsertCount} lists for session ${JSON.stringify(sessionId)}`);
+
+    return res.json({ success: true, upserted: upsertCount });
+  } catch (error: any) {
+    console.error('[WEBHOOK] lists-sync error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Webhook processing failed'
+    });
+  }
+});
+
 // ============================================================================
 // SSE ENDPOINTS - Real-time streaming to frontend
 // ============================================================================
@@ -700,7 +853,7 @@ router.post('/webhook/phase-change', async (req, res) => {
  * Frontend connects to receive live updates.
  */
 router.get('/stream/:sessionId', protect, async (req, res) => {
-  const { sessionId } = req.params;
+  const sessionId = req.params.sessionId as string;
   const userId = (req as any).user?.id;
 
   // Verify the user owns this sync job
@@ -825,7 +978,7 @@ router.get('/active-job', protect, async (req, res) => {
  */
 router.get('/job/:sessionId', protect, async (req, res) => {
   try {
-    const { sessionId } = req.params;
+    const sessionId = req.params.sessionId as string;
     const userId = (req as any).user?.id;
 
     const job = await SyncJob.findOne({ sessionId, userId });
@@ -921,7 +1074,7 @@ router.post('/job', protect, async (req, res) => {
  */
 router.delete('/job/:sessionId', protect, async (req, res) => {
   try {
-    const { sessionId } = req.params;
+    const sessionId = req.params.sessionId as string;
     const userId = (req as any).user?.id;
 
     const job = await SyncJob.findOne({ sessionId, userId });
