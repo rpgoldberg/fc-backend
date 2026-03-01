@@ -3,14 +3,18 @@ import mongoose from 'mongoose';
 import * as figureController from '../../src/controllers/figureController';
 import Figure from '../../src/models/Figure';
 import axios from 'axios';
-import * as searchService from '../../src/services/searchService';
 import '../setup'; // Import test setup for environment variables
 
-// Mock the search service
-jest.mock('../../src/services/searchService', () => ({
-  figureSearch: jest.fn()
+// Mock searchIndexService (fire-and-forget calls in CRUD)
+jest.mock('../../src/services/searchIndexService', () => ({
+  upsertFigureSearchIndex: jest.fn().mockResolvedValue(undefined),
+  deleteFigureSearchIndex: jest.fn().mockResolvedValue(undefined),
 }));
-const mockedSearchService = jest.mocked(searchService);
+
+// Mock tagValidation
+jest.mock('../../src/utils/tagValidation', () => ({
+  validateTags: jest.fn().mockReturnValue({ valid: [], invalid: [] }),
+}));
 
 // Comprehensive mocking for Figure model and external dependencies
 jest.mock('../../src/models/Figure', () => {
@@ -81,6 +85,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue(mockFigures)
       };
@@ -91,7 +96,8 @@ describe('FigureController', () => {
       await figureController.getFigures(mockRequest as Request, mockResponse as Response);
 
       expect(MockedFigure.find).toHaveBeenCalledWith({ userId: '000000000000000000000123' });
-      expect(mockFind.sort).toHaveBeenCalledWith({ createdAt: -1 });
+      expect(mockFind.sort).toHaveBeenCalledWith({ mfcActivityOrder: -1 });
+      expect(mockFind.collation).toHaveBeenCalledWith({ locale: 'en', strength: 2 });
       expect(mockFind.skip).toHaveBeenCalledWith(0);
       expect(mockFind.limit).toHaveBeenCalledWith(10);
       expect(mockResponse.status).toHaveBeenCalledWith(200);
@@ -110,6 +116,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -148,11 +155,16 @@ describe('FigureController', () => {
 
   describe('getFigureById', () => {
     it('should get figure by id successfully', async () => {
-      const mockFigure = {
+      const mockFigureData = {
         _id: 'fig123',
         manufacturer: 'GSC',
         name: 'Miku',
         userId: '000000000000000000000123'
+      };
+      const mockFigure = {
+        ...mockFigureData,
+        mfcId: undefined,
+        toObject: () => ({ ...mockFigureData }),
       };
 
       mockRequest.params = { id: 'fig123' };
@@ -167,7 +179,7 @@ describe('FigureController', () => {
       expect(mockResponse.status).toHaveBeenCalledWith(200);
       expect(mockResponse.json).toHaveBeenCalledWith({
         success: true,
-        data: mockFigure
+        data: mockFigureData
       });
     });
 
@@ -191,8 +203,6 @@ describe('FigureController', () => {
         manufacturer: 'Good Smile Company',
         name: 'Hatsune Miku',
         scale: '1/8',
-        location: 'Shelf A',
-        boxNumber: 'Box 1'
       };
 
       const mockCreatedFigure = {
@@ -211,8 +221,6 @@ describe('FigureController', () => {
           name: 'Hatsune Miku',
           scale: '1/8',
           mfcLink: '',
-          location: 'Shelf A',
-          boxNumber: 'Box 1',
           imageUrl: '',
           userId: '000000000000000000000123'
         })
@@ -272,8 +280,6 @@ describe('FigureController', () => {
           scale: '1/8',
           mfcLink: '12345', // Normalized to just ID
           mfcId: 12345,     // Extracted from URL
-          location: '',
-          boxNumber: '',
           imageUrl: 'https://example.com/image.jpg',
           userId: '000000000000000000000123'
         })
@@ -539,137 +545,18 @@ describe('FigureController', () => {
     });
   });
 
-  describe('searchFigures', () => {
-    beforeEach(() => {
-      // Reset mocks before each test
-      jest.clearAllMocks();
-    });
-
-    it('should handle database errors during search', async () => {
-      mockRequest.query = { query: 'Miku' };
-
-      // Simulate a database error from the search service
-      mockedSearchService.figureSearch.mockRejectedValue(new Error('Database connection failed'));
-
-      await figureController.searchFigures(mockRequest as Request, mockResponse as Response);
-
-      expect(mockResponse.status).toHaveBeenCalledWith(500);
-      expect(mockResponse.json).toHaveBeenCalledWith({
-        success: false,
-        message: 'Server Error',
-        error: 'Database connection failed'
-      });
-    });
-
-    it('should handle invalid search query formats', async () => {
-      mockRequest.query = { query: '' };
-
-      await figureController.searchFigures(mockRequest as Request, mockResponse as Response);
-
-      expect(mockResponse.status).toHaveBeenCalledWith(400);
-      expect(mockResponse.json).toHaveBeenCalledWith({
-        success: false,
-        message: 'Search query is required'
-      });
-    });
-
-    it('should handle search with very long query', async () => {
-      mockRequest.query = { query: 'A'.repeat(300) };
-
-      // Mock successful search via service (no results for long nonsense query)
-      mockedSearchService.figureSearch.mockResolvedValue([]);
-
-      await figureController.searchFigures(mockRequest as Request, mockResponse as Response);
-
-      expect(mockResponse.status).toHaveBeenCalledWith(200);
-      expect(mockResponse.json).toHaveBeenCalledWith({
-        success: true,
-        count: 0,
-        data: []
-      });
-    });
-
-    it('should search figures via search service and return results', async () => {
-      mockRequest.query = { query: 'Miku' };
-
-      const userId = '000000000000000000000123';
-      const mockSearchResults = [
-        {
-          _id: 'fig1',
-          manufacturer: 'GSC',
-          name: 'Hatsune Miku',
-          scale: '1/8',
-          mfcLink: '',
-          location: 'Shelf A',
-          boxNumber: 'Box 1',
-          imageUrl: 'https://example.com/image.jpg',
-          userId: new mongoose.Types.ObjectId(userId),
-          searchScore: 2.5 // Atlas Search score (undefined for regex fallback)
-        }
-      ];
-
-      // Mock the search service
-      mockedSearchService.figureSearch.mockResolvedValue(mockSearchResults as any);
-
-      await figureController.searchFigures(mockRequest as Request, mockResponse as Response);
-
-      // Verify the service was called with correct parameters
-      expect(mockedSearchService.figureSearch).toHaveBeenCalledWith(
-        'Miku',
-        expect.any(mongoose.Types.ObjectId)
-      );
-
-      expect(mockResponse.status).toHaveBeenCalledWith(200);
-      expect(mockResponse.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          success: true,
-          count: 1,
-          data: expect.any(Array)
-        })
-      );
-
-      // Check the actual response data separately for better debugging
-      const responseCall = (mockResponse.json as jest.Mock).mock.calls[0][0];
-      expect(responseCall.data).toHaveLength(1);
-      expect(responseCall.data[0]).toMatchObject({
-        id: 'fig1',
-        manufacturer: 'GSC',
-        name: 'Hatsune Miku',
-        scale: '1/8',
-        mfcLink: '',
-        location: 'Shelf A',
-        boxNumber: 'Box 1',
-        imageUrl: 'https://example.com/image.jpg',
-        userId: expect.any(mongoose.Types.ObjectId),
-        searchScore: 2.5 // Verify searchScore is passed through from service
-      });
-    });
-
-    it('should return error if query parameter is missing', async () => {
-      mockRequest.query = {};
-
-      await figureController.searchFigures(mockRequest as Request, mockResponse as Response);
-
-      expect(mockResponse.status).toHaveBeenCalledWith(400);
-      expect(mockResponse.json).toHaveBeenCalledWith({
-        success: false,
-        message: 'Search query is required'
-      });
-    });
-  });
-
   describe('filterFigures', () => {
     it('should filter figures with multiple criteria', async () => {
       mockRequest.query = {
         manufacturer: 'GSC',
         scale: '1/8',
-        location: 'Shelf',
         page: '1',
         limit: '10'
       };
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -680,7 +567,7 @@ describe('FigureController', () => {
       await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
 
       // Manufacturer filter now uses $and with $or to search both legacy field and companyRoles
-      // Scale/location use anchored regex for exact matching
+      // Scale uses anchored regex for exact matching
       expect(MockedFigure.find).toHaveBeenCalledWith(
         expect.objectContaining({
           userId: '000000000000000000000123',
@@ -700,81 +587,8 @@ describe('FigureController', () => {
             })
           ]),
           scale: expect.objectContaining({ $regex: expect.any(String) }),
-          location: expect.objectContaining({ $regex: 'Shelf' })
         })
       );
-    });
-  });
-
-  describe('getFigureStats', () => {
-    it('should return figure statistics', async () => {
-      const mockManufacturerStats = [
-        { _id: 'GSC', count: 5 },
-        { _id: 'Alter', count: 3 }
-      ];
-      const mockStatusCounts = [
-        { _id: 'owned', count: 6 },
-        { _id: 'ordered', count: 2 }
-      ];
-      const mockV3ManufacturerStats = [{ _id: 'GSC', count: 5 }];
-      const mockDistributorStats = [{ _id: 'Native', count: 2 }];
-
-      MockedFigure.countDocuments = jest.fn().mockResolvedValue(8);
-      MockedFigure.aggregate = jest.fn()
-        .mockResolvedValueOnce(mockStatusCounts)      // statusCounts
-        .mockResolvedValueOnce(mockManufacturerStats) // manufacturerStats
-        .mockResolvedValueOnce([{ _id: '1/8', count: 6 }])   // scaleStats
-        .mockResolvedValueOnce([{ _id: 'Shelf A', count: 4 }]) // locationStats
-        .mockResolvedValueOnce([{ _id: 'Fate', count: 3 }])   // originStats
-        .mockResolvedValueOnce([{ _id: 'Scale', count: 5 }])  // categoryStats
-        .mockResolvedValueOnce(mockV3ManufacturerStats)       // v3ManufacturerStats
-        .mockResolvedValueOnce(mockDistributorStats);         // distributorStats
-
-      await figureController.getFigureStats(mockRequest as Request, mockResponse as Response);
-
-      expect(mockResponse.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-cache, no-store, must-revalidate');
-      expect(mockResponse.status).toHaveBeenCalledWith(200);
-      expect(mockResponse.json).toHaveBeenCalledWith({
-        success: true,
-        data: {
-          totalCount: 8,
-          statusCounts: { owned: 6, ordered: 2, wished: 0 },
-          manufacturerStats: mockManufacturerStats,
-          v3ManufacturerStats: mockV3ManufacturerStats,
-          distributorStats: mockDistributorStats,
-          scaleStats: [{ _id: '1/8', count: 6 }],
-          locationStats: [{ _id: 'Shelf A', count: 4 }],
-          originStats: [{ _id: 'Fate', count: 3 }],
-          categoryStats: [{ _id: 'Scale', count: 5 }],
-          activeStatus: null
-        }
-      });
-    });
-
-    it('should handle invalid user ID during stats retrieval', async () => {
-      mockRequest.user = { id: 'INVALID_USER_ID' };
-
-      await figureController.getFigureStats(mockRequest as Request, mockResponse as Response);
-
-      expect(mockResponse.status).toHaveBeenCalledWith(400);
-      expect(mockResponse.json).toHaveBeenCalledWith({
-        success: false,
-        message: 'Invalid user identifier'
-      });
-    });
-
-    it('should handle database errors during statistics calculation', async () => {
-      // The first aggregate call in getFigureStats is for statusCounts
-      MockedFigure.aggregate = jest.fn().mockRejectedValue(new Error('Database query failed'));
-
-      await figureController.getFigureStats(mockRequest as Request, mockResponse as Response);
-
-      expect(mockResponse.status).toHaveBeenCalledWith(500);
-      expect(mockResponse.json).toHaveBeenCalledWith({
-        success: false,
-        message: 'Server Error',
-        error: 'Database query failed'
-      });
     });
   });
 
@@ -1013,8 +827,6 @@ describe('FigureController', () => {
         scale: '1/8',
         imageUrl: 'https://example.com/image.jpg',
         mfcLink: 'https://myfigurecollection.net/item/12345',
-        location: 'Shelf A',
-        boxNumber: 'Box 1'
       };
 
       const mockCreatedFigure = {
@@ -1036,8 +848,6 @@ describe('FigureController', () => {
           scale: '1/8',
           mfcLink: '12345', // Normalized to just ID
           mfcId: 12345,     // Extracted from URL
-          location: 'Shelf A',
-          boxNumber: 'Box 1',
           imageUrl: 'https://example.com/image.jpg',
           userId: '000000000000000000000123'
         })
@@ -1446,6 +1256,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -1503,6 +1314,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -1525,6 +1337,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2075,30 +1888,6 @@ describe('FigureController', () => {
     });
   });
 
-  describe('searchFigures - additional branches', () => {
-    it('should return 401 when user is not authenticated', async () => {
-      mockRequest.user = undefined;
-      mockRequest.query = { query: 'test' };
-
-      await figureController.searchFigures(mockRequest as Request, mockResponse as Response);
-
-      expect(mockResponse.status).toHaveBeenCalledWith(401);
-    });
-
-    it('should return 400 for invalid userId during search', async () => {
-      mockRequest.user = { id: 'INVALID_NOT_OBJECTID' };
-      mockRequest.query = { query: 'test' };
-
-      await figureController.searchFigures(mockRequest as Request, mockResponse as Response);
-
-      expect(mockResponse.status).toHaveBeenCalledWith(400);
-      expect(mockResponse.json).toHaveBeenCalledWith({
-        success: false,
-        message: 'Invalid user identifier'
-      });
-    });
-  });
-
   describe('filterFigures - additional branches', () => {
     it('should return 401 when user is not authenticated', async () => {
       mockRequest.user = undefined;
@@ -2113,6 +1902,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2137,6 +1927,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2157,6 +1948,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2173,10 +1965,11 @@ describe('FigureController', () => {
     });
 
     it('should handle mixed __unspecified__ and specified scale values', async () => {
-      mockRequest.query = { scale: '__unspecified__,1/7' };
+      mockRequest.query = { scale: '__unspecified__|1/7' };
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2195,10 +1988,11 @@ describe('FigureController', () => {
     });
 
     it('should handle multiple scale values', async () => {
-      mockRequest.query = { scale: '1/7,1/8' };
+      mockRequest.query = { scale: '1/7|1/8' };
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2214,8 +2008,29 @@ describe('FigureController', () => {
       );
     });
 
-    it('should handle multiple location values', async () => {
-      mockRequest.query = { location: 'Shelf A,Shelf B' };
+    it('should filter by tag (exact match)', async () => {
+      mockRequest.query = { tag: 'character:miku' };
+
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue([])
+      };
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
+
+      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tags: 'character:miku'
+        })
+      );
+    });
+
+    it('should filter by tagGroup (prefix match)', async () => {
+      mockRequest.query = { tagGroup: 'character' };
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
@@ -2229,7 +2044,7 @@ describe('FigureController', () => {
 
       expect(MockedFigure.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          location: expect.objectContaining({ $in: expect.any(Array) })
+          tags: { $regex: '^character:', $options: 'i' }
         })
       );
     });
@@ -2239,6 +2054,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2255,10 +2071,11 @@ describe('FigureController', () => {
     });
 
     it('should filter by origin with mixed __unspecified__ and specified values', async () => {
-      mockRequest.query = { origin: '__unspecified__,Vocaloid' };
+      mockRequest.query = { origin: '__unspecified__|Vocaloid' };
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2277,10 +2094,11 @@ describe('FigureController', () => {
     });
 
     it('should filter by multiple origin values', async () => {
-      mockRequest.query = { origin: 'Vocaloid,Fate' };
+      mockRequest.query = { origin: 'Vocaloid|Fate' };
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2301,6 +2119,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2317,10 +2136,11 @@ describe('FigureController', () => {
     });
 
     it('should filter by category with mixed __unspecified__ and specified', async () => {
-      mockRequest.query = { category: '__unspecified__,Scale' };
+      mockRequest.query = { category: '__unspecified__|Scale' };
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2339,10 +2159,11 @@ describe('FigureController', () => {
     });
 
     it('should filter by multiple category values', async () => {
-      mockRequest.query = { category: 'Scale,Trading' };
+      mockRequest.query = { category: 'Scale|Trading' };
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2415,6 +2236,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2444,6 +2266,7 @@ describe('FigureController', () => {
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2468,31 +2291,12 @@ describe('FigureController', () => {
       );
     });
 
-    it('should filter by boxNumber', async () => {
-      mockRequest.query = { boxNumber: 'Box 1' };
-
-      const mockFind = {
-        sort: jest.fn().mockReturnThis(),
-        skip: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockResolvedValue([])
-      };
-      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
-      MockedFigure.countDocuments = jest.fn().mockResolvedValue(0);
-
-      await figureController.filterFigures(mockRequest as Request, mockResponse as Response);
-
-      expect(MockedFigure.find).toHaveBeenCalledWith(
-        expect.objectContaining({
-          boxNumber: { $regex: 'Box 1', $options: 'i' }
-        })
-      );
-    });
-
     it('should filter with multiple manufacturers', async () => {
-      mockRequest.query = { manufacturer: 'GSC,Alter' };
+      mockRequest.query = { manufacturer: 'GSC|Alter' };
 
       const mockFind = {
         sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         limit: jest.fn().mockResolvedValue([])
       };
@@ -2524,69 +2328,4 @@ describe('FigureController', () => {
     });
   });
 
-  describe('getFigureStats - additional branches', () => {
-    it('should return 401 when user is not authenticated', async () => {
-      mockRequest.user = undefined;
-
-      await figureController.getFigureStats(mockRequest as Request, mockResponse as Response);
-
-      expect(mockResponse.status).toHaveBeenCalledWith(401);
-    });
-
-    it('should filter stats by owned status', async () => {
-      mockRequest.query = { status: 'owned' };
-
-      const mockStatusCounts = [{ _id: 'owned', count: 5 }];
-      MockedFigure.countDocuments = jest.fn().mockResolvedValue(5);
-      MockedFigure.aggregate = jest.fn()
-        .mockResolvedValueOnce(mockStatusCounts)  // statusCounts
-        .mockResolvedValueOnce([])  // manufacturerStats
-        .mockResolvedValueOnce([])  // scaleStats
-        .mockResolvedValueOnce([])  // locationStats
-        .mockResolvedValueOnce([])  // originStats
-        .mockResolvedValueOnce([])  // categoryStats
-        .mockResolvedValueOnce([])  // v3ManufacturerStats
-        .mockResolvedValueOnce([]); // distributorStats
-
-      await figureController.getFigureStats(mockRequest as Request, mockResponse as Response);
-
-      expect(mockResponse.status).toHaveBeenCalledWith(200);
-      expect(mockResponse.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          success: true,
-          data: expect.objectContaining({
-            activeStatus: 'owned'
-          })
-        })
-      );
-    });
-
-    it('should filter stats by non-owned status', async () => {
-      mockRequest.query = { status: 'ordered' };
-
-      const mockStatusCounts = [{ _id: 'ordered', count: 3 }];
-      MockedFigure.countDocuments = jest.fn().mockResolvedValue(3);
-      MockedFigure.aggregate = jest.fn()
-        .mockResolvedValueOnce(mockStatusCounts)
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([]);
-
-      await figureController.getFigureStats(mockRequest as Request, mockResponse as Response);
-
-      expect(mockResponse.status).toHaveBeenCalledWith(200);
-      expect(mockResponse.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          success: true,
-          data: expect.objectContaining({
-            activeStatus: 'ordered'
-          })
-        })
-      );
-    });
-  });
 });

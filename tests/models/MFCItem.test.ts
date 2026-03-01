@@ -372,15 +372,17 @@ describe('MFCItem Model', () => {
         name: 'Base Figure',
         relatedItems: [{
           mfcId: 900002,
-          relationTypeId: variantRelationId,
-          name: 'Color Variant'
+          relationType: 'Variant',
+          name: 'Color Variant',
+          imageUrl: 'https://static.mfc.net/image/900002.jpg'
         }]
       });
 
       expect(item.relatedItems.length).toBe(1);
       expect(item.relatedItems[0].mfcId).toBe(900002);
-      expect(item.relatedItems[0].relationTypeId.toString()).toBe(variantRelationId.toString());
+      expect(item.relatedItems[0].relationType).toBe('Variant');
       expect(item.relatedItems[0].name).toBe('Color Variant');
+      expect(item.relatedItems[0].imageUrl).toBe('https://static.mfc.net/image/900002.jpg');
     });
   });
 

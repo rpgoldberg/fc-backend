@@ -28,32 +28,32 @@ describe('Atlas Search Integration Tests', () => {
         {
           manufacturer: 'Good Smile Company',
           name: 'Hatsune Miku',
-          location: 'Shelf A',
-          boxNumber: 'Box 001',
+          tags: ['location:shelf-a'],
+          origin: 'Vocaloid',
           scale: '1/8',
           userId: testUser._id
         },
         {
           manufacturer: 'Alter',
           name: 'Kagamine Rin',
-          location: 'Shelf B',
-          boxNumber: 'Box 002',
+          tags: ['location:shelf-b'],
+          origin: 'Vocaloid',
           scale: '1/7',
           userId: testUser._id
         },
         {
           manufacturer: 'Good Smile Company',
           name: 'Megumin',
-          location: 'Display Cabinet',
-          boxNumber: 'Box 003',
+          tags: ['location:display-cabinet'],
+          origin: 'KonoSuba',
           scale: '1/8',
           userId: testUser._id
         },
         {
           manufacturer: 'Kotobukiya',
           name: 'Mikasa Ackerman',
-          location: 'Shelf A',
-          boxNumber: 'Box 004',
+          tags: ['location:shelf-a'],
+          origin: 'Attack on Titan',
           scale: '1/8',
           userId: testUser._id
         }
@@ -74,8 +74,8 @@ describe('Atlas Search Integration Tests', () => {
       results = mockAtlasSearch('Good Smile Company', allFigures, testUser._id);
       expect(results).toHaveLength(2);
       
-      // Test location search
-      results = mockAtlasSearch('Shelf A', allFigures, testUser._id);
+      // Test tag search (location tags)
+      results = mockAtlasSearch('shelf-a', allFigures, testUser._id);
       expect(results).toHaveLength(2);
       
       // Test partial match
@@ -132,7 +132,7 @@ describe('Atlas Search Integration Tests', () => {
       await Figure.create({
         manufacturer: 'Good Smile Company',
         name: 'Other User Miku',
-        location: 'Other Location',
+        tags: ['location:other'],
         userId: otherUser._id
       });
 

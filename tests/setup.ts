@@ -73,14 +73,15 @@ export const mockAtlasSearch = (searchQuery: string, documents: any[], userId: m
   
   const query = searchQuery.toLowerCase().trim();
   
-  // Search across multiple fields (manufacturer, name, location, boxNumber)
+  // Search across multiple fields (manufacturer, name, tags, origin, category, scale)
   return userDocs.filter(doc => {
     const searchableText = [
       doc.manufacturer || '',
       doc.name || '',
-      doc.location || '',
-      doc.boxNumber || '',
-      doc.scale || ''
+      doc.origin || '',
+      doc.category || '',
+      doc.scale || '',
+      ...(doc.tags || [])
     ].join(' ').toLowerCase();
     
     // Support both exact and partial matches

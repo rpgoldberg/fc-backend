@@ -34,14 +34,17 @@
         }
       ],
       "entityType": {
-        "type": "string",
-        "analyzer": "lucene.keyword"
+        "type": "token",
+        "normalizer": "lowercase"
       },
       "popularity": {
         "type": "number"
       },
       "mfcId": {
         "type": "number"
+      },
+      "userId": {
+        "type": "objectId"
       }
     }
   }

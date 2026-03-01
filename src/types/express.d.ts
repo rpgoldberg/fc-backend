@@ -7,6 +7,9 @@ declare global {
         id: string;
         email?: string;
         username?: string;
+        emailVerified?: boolean;
+        emailVerificationGraceExpiry?: Date;
+        twoFactorEnabled?: boolean;
       };
     }
   }

@@ -425,7 +425,7 @@ describe('SearchIndex Model', () => {
   });
 
   describe('entityTypeRef virtual', () => {
-    it('should return MFCItem for figure entity type', async () => {
+    it('should return Figure for figure entity type', async () => {
       const mfcItem = await MFCItem.create({
         mfcId: 95001,
         mfcUrl: 'https://myfigurecollection.net/item/95001',
@@ -439,7 +439,7 @@ describe('SearchIndex Model', () => {
         nameSearchable: 'virtual ref test figure'
       });
 
-      expect((searchEntry as any).entityTypeRef).toBe('MFCItem');
+      expect((searchEntry as any).entityTypeRef).toBe('Figure');
     });
 
     it('should return Company for company entity type', async () => {

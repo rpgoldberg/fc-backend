@@ -95,8 +95,6 @@ describe('Figure Model', () => {
         name: 'Hatsune Miku',
         scale: '1/8',
         mfcLink: 'https://myfigurecollection.net/item/12345',
-        location: 'Shelf A',
-        boxNumber: 'Box 1',
         imageUrl: 'https://example.com/image.jpg',
         userId: testUserId
       };
@@ -106,8 +104,6 @@ describe('Figure Model', () => {
 
       expect(savedFigure.scale).toBe(figureData.scale);
       expect(savedFigure.mfcLink).toBe(figureData.mfcLink);
-      expect(savedFigure.location).toBe(figureData.location);
-      expect(savedFigure.boxNumber).toBe(figureData.boxNumber);
       expect(savedFigure.imageUrl).toBe(figureData.imageUrl);
     });
 
@@ -117,8 +113,6 @@ describe('Figure Model', () => {
         name: 'Hatsune Miku',
         scale: '',
         mfcLink: '',
-        location: '',
-        boxNumber: '',
         imageUrl: '',
         userId: testUserId
       };
@@ -128,8 +122,6 @@ describe('Figure Model', () => {
 
       expect(savedFigure.scale).toBe('');
       expect(savedFigure.mfcLink).toBe('');
-      expect(savedFigure.location).toBe('');
-      expect(savedFigure.boxNumber).toBe('');
       expect(savedFigure.imageUrl).toBe('');
     });
   });
@@ -194,35 +186,24 @@ describe('Figure Model', () => {
       const figure1Data = {
         manufacturer: 'Good Smile Company',
         name: 'Hatsune Miku',
-        location: 'Shelf A',
-        boxNumber: 'Box 1',
         userId: testUserId
       };
 
       const figure2Data = {
         manufacturer: 'Good Smile Company',
         name: 'Kagamine Rin',
-        location: 'Shelf A',
-        boxNumber: 'Box 2',
         userId: testUserId
       };
 
       await Figure.create([figure1Data, figure2Data]);
 
       // Test compound index on manufacturer + name
-      const foundByCompound1 = await Figure.findOne({ 
-        manufacturer: 'Good Smile Company', 
-        name: 'Hatsune Miku' 
+      const foundByCompound = await Figure.findOne({
+        manufacturer: 'Good Smile Company',
+        name: 'Hatsune Miku'
       });
 
-      // Test compound index on location + boxNumber
-      const foundByCompound2 = await Figure.findOne({ 
-        location: 'Shelf A', 
-        boxNumber: 'Box 1' 
-      });
-
-      expect(foundByCompound1?.name).toBe('Hatsune Miku');
-      expect(foundByCompound2?.name).toBe('Hatsune Miku');
+      expect(foundByCompound?.name).toBe('Hatsune Miku');
     });
   });
 
@@ -267,14 +248,12 @@ describe('Figure Model', () => {
   describe('Data Types and Edge Cases', () => {
     it('should handle long strings', async () => {
       const longString = 'A'.repeat(1000);
-      
+
       const figureData = {
         manufacturer: longString,
         name: longString,
         scale: longString,
         mfcLink: longString,
-        location: longString,
-        boxNumber: longString,
         imageUrl: longString,
         userId: testUserId
       };
@@ -291,8 +270,6 @@ describe('Figure Model', () => {
         manufacturer: 'メーカー株式会社',
         name: 'フィギュア名！@#$%^&*()',
         scale: '1/8スケール',
-        location: 'Shelf あ',
-        boxNumber: 'Box №1',
         userId: testUserId
       };
 
@@ -302,8 +279,6 @@ describe('Figure Model', () => {
       expect(savedFigure.manufacturer).toBe(figureData.manufacturer);
       expect(savedFigure.name).toBe(figureData.name);
       expect(savedFigure.scale).toBe(figureData.scale);
-      expect(savedFigure.location).toBe(figureData.location);
-      expect(savedFigure.boxNumber).toBe(figureData.boxNumber);
     });
 
     it('should handle URL formats in mfcLink and imageUrl', async () => {
@@ -331,24 +306,18 @@ describe('Figure Model', () => {
           manufacturer: 'Good Smile Company',
           name: 'Hatsune Miku',
           scale: '1/8',
-          location: 'Shelf A',
-          boxNumber: 'Box 1',
           userId: testUserId
         },
         {
           manufacturer: 'Alter',
           name: 'Kagamine Rin',
           scale: '1/7',
-          location: 'Shelf B',
-          boxNumber: 'Box 2',
           userId: testUserId
         },
         {
           manufacturer: 'Good Smile Company',
           name: 'Megumin',
           scale: '1/8',
-          location: 'Shelf A',
-          boxNumber: 'Box 3',
           userId: testUserId
         }
       ];
@@ -367,12 +336,6 @@ describe('Figure Model', () => {
       const figures = await Figure.find({ scale: '1/8' });
       expect(figures).toHaveLength(2);
       expect(figures.every(f => f.scale === '1/8')).toBe(true);
-    });
-
-    it('should find figures by location', async () => {
-      const figures = await Figure.find({ location: 'Shelf A' });
-      expect(figures).toHaveLength(2);
-      expect(figures.every(f => f.location === 'Shelf A')).toBe(true);
     });
 
     it('should support regex queries', async () => {

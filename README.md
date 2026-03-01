@@ -66,6 +66,7 @@ See `.env.example` for all configuration options including:
 - Local MongoDB (default) vs MongoDB Atlas
 - JWT secrets and token expiry settings
 - Optional refresh token rotation
+- Email verification, TOTP 2FA, and WebAuthn passkey configuration
 
 ### Local Development
 
@@ -198,6 +199,20 @@ See `.env.example` for complete configuration template. Run `./setup-local-env.s
 - `ENABLE_ATLAS_SEARCH`: Set to `true` on environments with Atlas Search indexes configured
   - Enables Atlas Search `$search` operator for advanced search features
   - Falls back to regex search when not set or when `TEST_MODE=memory`
+
+**Auth Modernization (Email Verification, 2FA, Passkeys):**
+- `EMAIL_FROM`: Sender address for verification/reset emails (default: `noreply@figurecollecting.com`)
+- `FRONTEND_URL`: Base URL for email links (local: `http://localhost:5081`, prod: `https://figurecollecting.com`)
+- `RESEND_API_KEY`: Resend API key for sending emails (omit for console fallback in dev)
+- `EMAIL_VERIFICATION_EXPIRY_HOURS`: Token expiry for email verification (default: 24)
+- `PASSWORD_RESET_EXPIRY_MINUTES`: Token expiry for password reset (default: 30)
+- `EMAIL_VERIFICATION_GRACE_DAYS`: Grace period before verification is enforced (default: 7)
+- `TOTP_ENCRYPTION_KEY`: AES-256-GCM key for encrypting TOTP secrets — generate with `openssl rand -hex 32`
+  - ⚠️ **Must match across environments sharing the same database**
+  - ⚠️ **Do not change after users have set up 2FA** — existing secrets become undecryptable
+- `WEBAUTHN_RP_NAME`: Relying party display name for passkey prompts (default: `FigureCollecting`)
+- `WEBAUTHN_RP_ID`: Domain for passkey binding (local: `localhost`, prod: `figurecollecting.com`)
+- `WEBAUTHN_ORIGIN`: Full origin URL for WebAuthn (local: `http://localhost:5081`, prod: `https://figurecollecting.com`)
 
 **Debug Logging:**
 - `DEBUG`: Set to `true` to enable all application loggers (AUTH, SYNC, MAIN, DATABASE, etc.)

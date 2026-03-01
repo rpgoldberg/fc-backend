@@ -1,9 +1,13 @@
 import { Request, Response } from 'express';
 import User from '../models/User';
 import RefreshToken from '../models/RefreshToken';
-import jwt, { SignOptions } from 'jsonwebtoken';
+import TwoFactorSession from '../models/TwoFactorSession';
+import EmailVerificationToken from '../models/EmailVerificationToken';
+import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { handleErrorResponse } from '../utils/responseUtils';
+import { sendVerificationEmail } from '../services/emailService';
 
 interface TokenPayload {
   id: string;
@@ -111,19 +115,38 @@ export const register = async (req: Request, res: Response): Promise<Response | 
       });
     }
     
-    // Create new user
+    // Create new user with email verification grace period
+    const graceDays = parseInt(process.env.EMAIL_VERIFICATION_GRACE_DAYS || '7', 10);
+    const graceExpiry = new Date();
+    graceExpiry.setDate(graceExpiry.getDate() + graceDays);
+
     const user = await User.create({ // NOSONAR - Mongoose ODM (parameterized)
       username,
       email,
-      password
+      password,
+      emailVerified: false,
+      emailVerificationGraceExpiry: graceExpiry
     });
-    
+
     const accessToken = generateAccessToken(user._id.toString());
     const refreshToken = generateRefreshToken();
-    
+
     // Save refresh token to database
     await saveRefreshToken(user._id.toString(), refreshToken, req);
-    
+
+    // Send verification email (non-blocking — don't fail registration if email fails)
+    try {
+      const rawToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = await bcrypt.hash(rawToken, 10);
+      await EmailVerificationToken.create({
+        userId: user._id,
+        tokenHash
+      });
+      await sendVerificationEmail(email, rawToken, user._id.toString());
+    } catch (emailError) {
+      console.error('Failed to send verification email:', emailError);
+    }
+
     res.status(201).json({
       success: true,
       data: {
@@ -132,6 +155,7 @@ export const register = async (req: Request, res: Response): Promise<Response | 
         email: user.email,
         isAdmin: user.isAdmin,
         colorProfile: user.colorProfile,
+        emailVerified: false,
         accessToken,
         refreshToken
       }
@@ -145,33 +169,81 @@ export const register = async (req: Request, res: Response): Promise<Response | 
 export const login = async (req: Request, res: Response): Promise<Response | void> => {
   try {
     const { email, password } = req.body;
-    
+
     // Find user by email
     const user = await User.findOne({ email }); // NOSONAR - Mongoose ODM (parameterized)
-    
+
     if (!user) {
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password'
       });
     }
-    
+
     // Check password
     const isMatch = await user.comparePassword(password);
-    
+
     if (!isMatch) {
       return res.status(401).json({
         success: false,
         message: 'Invalid email or password'
       });
     }
-    
+
+    // Grace period for existing users who haven't been assigned one yet
+    if (user.emailVerified === undefined || (user.emailVerified === false && !user.emailVerificationGraceExpiry)) {
+      const graceDays = parseInt(process.env.EMAIL_VERIFICATION_GRACE_DAYS || '7', 10);
+      const graceExpiry = new Date();
+      graceExpiry.setDate(graceExpiry.getDate() + graceDays);
+      user.emailVerified = false;
+      user.emailVerificationGraceExpiry = graceExpiry;
+      await user.save();
+
+      // Send verification email silently for existing users
+      try {
+        const rawToken = crypto.randomBytes(32).toString('hex');
+        const tokenHash = await bcrypt.hash(rawToken, 10);
+        await EmailVerificationToken.create({ userId: user._id, tokenHash });
+        await sendVerificationEmail(email, rawToken, user._id.toString());
+      } catch (emailError) {
+        console.error('Failed to send verification email:', emailError);
+      }
+    }
+
+    // Check if 2FA is enabled — intercept and return session instead of tokens
+    if (user.twoFactorEnabled) {
+      const methods: string[] = [];
+      if (user.totp?.verified) methods.push('totp');
+      // Check backup codes exist (need to select them)
+      const userWithBackup = await User.findById(user._id).select('+backupCodes');
+      if (userWithBackup?.backupCodes && userWithBackup.backupCodes.length > 0) {
+        methods.push('backup');
+      }
+      if (user.webauthnCredentials && user.webauthnCredentials.length > 0) {
+        methods.push('webauthn');
+      }
+
+      const session = await TwoFactorSession.create({
+        userId: user._id,
+        methods
+      });
+
+      return res.status(200).json({
+        success: true,
+        requiresTwoFactor: true,
+        data: {
+          sessionId: session._id,
+          methods
+        }
+      });
+    }
+
     const accessToken = generateAccessToken(user._id.toString());
     const refreshToken = generateRefreshToken();
-    
+
     // Save refresh token to database
     await saveRefreshToken(user._id.toString(), refreshToken, req);
-    
+
     res.status(200).json({
       success: true,
       data: {
@@ -180,6 +252,9 @@ export const login = async (req: Request, res: Response): Promise<Response | voi
         email: user.email,
         isAdmin: user.isAdmin,
         colorProfile: user.colorProfile,
+        emailVerified: user.emailVerified ?? false,
+        twoFactorEnabled: user.twoFactorEnabled ?? false,
+        webauthnCredentialCount: user.webauthnCredentials?.length ?? 0,
         accessToken,
         refreshToken
       }
@@ -369,6 +444,14 @@ export const getProfile = async (req: Request, res: Response): Promise<Response 
         email: user.email,
         isAdmin: user.isAdmin,
         colorProfile: user.colorProfile,
+        emailVerified: user.emailVerified ?? false,
+        twoFactorEnabled: user.twoFactorEnabled ?? false,
+        webauthnCredentialCount: user.webauthnCredentials?.length ?? 0,
+        webauthnCredentials: (user.webauthnCredentials || []).map(cred => ({
+          credentialId: cred.credentialId,
+          nickname: cred.nickname,
+          createdAt: cred.createdAt,
+        })),
         createdAt: user.createdAt,
         updatedAt: user.updatedAt
       }

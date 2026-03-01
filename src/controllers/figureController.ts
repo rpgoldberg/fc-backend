@@ -1,10 +1,12 @@
 import { Request, Response } from 'express';
 import Figure, { IFigure } from '../models/Figure';
+import MFCItem from '../models/MFCItem';
 import mongoose from 'mongoose';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { createLogger } from '../utils/logger';
-import { figureSearch } from '../services/searchService';
+import { upsertFigureSearchIndex, deleteFigureSearchIndex } from '../services/searchIndexService';
+import { validateTags } from '../utils/tagValidation';
 
 // Create secure logger instance for this controller
 const logger = createLogger('FIGURE');
@@ -360,7 +362,7 @@ export const getFigures = async (req: Request, res: Response) => {
 
     // Validate sortBy parameter
     const sortByParam = req.query.sortBy as string;
-    const validSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
+    const validSortFields = ['createdAt', 'updatedAt', 'name', 'manufacturer', 'scale', 'activity'];
     if (sortByParam && !validSortFields.includes(sortByParam)) {
       validationErrors.push(`sortBy must be one of: ${validSortFields.join(', ')}`);
     }
@@ -390,7 +392,7 @@ export const getFigures = async (req: Request, res: Response) => {
     // Use default values if not specified
     const validPage = page || 1;
     const validLimit = limit || 10;
-    const validSortBy = sortByParam || 'createdAt';
+    const validSortBy = sortByParam || 'activity';
     const validSortOrder = sortOrderParam === 'asc' ? 1 : -1;
     const skip = (validPage - 1) * validLimit;
 
@@ -422,12 +424,15 @@ export const getFigures = async (req: Request, res: Response) => {
     }
 
     // Build dynamic sort object - use allowlist guard for property injection safety
-    const allowedSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
-    const safeSortBy = allowedSortFields.includes(validSortBy) ? validSortBy : 'createdAt';
-    const sortOptions: Record<string, 1 | -1> = { [safeSortBy]: validSortOrder };
+    // Map 'activity' to actual DB field 'mfcActivityOrder'
+    const allowedSortFields = ['createdAt', 'updatedAt', 'name', 'manufacturer', 'scale', 'activity'];
+    const safeSortBy = allowedSortFields.includes(validSortBy) ? validSortBy : 'activity';
+    const dbSortField = safeSortBy === 'activity' ? 'mfcActivityOrder' : safeSortBy;
+    const sortOptions: Record<string, 1 | -1> = { [dbSortField]: validSortOrder };
 
     const figures = await Figure.find(query)
       .sort(sortOptions)
+      .collation({ locale: 'en', strength: 2 })
       .skip(skip)
       .limit(validLimit);
 
@@ -471,10 +476,25 @@ export const getFigureById = async (req: Request, res: Response) => {
         message: 'Figure not found'
       });
     }
-    
+
+    // Enrich with shared catalog data (community stats, related items)
+    const figureObj = figure.toObject();
+    if (figure.mfcId) {
+      const mfcItem = await MFCItem.findOne(
+        { mfcId: figure.mfcId },
+        { communityStats: 1, relatedItems: 1 }
+      ).lean();
+      if (mfcItem) {
+        if (mfcItem.communityStats) (figureObj as any).communityStats = mfcItem.communityStats;
+        if (mfcItem.relatedItems && mfcItem.relatedItems.length > 0) {
+          (figureObj as any).relatedItems = mfcItem.relatedItems;
+        }
+      }
+    }
+
     return res.status(200).json({
       success: true,
-      data: figure
+      data: figureObj
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -499,9 +519,9 @@ export const createFigure = async (req: Request, res: Response) => {
     // Destructure all v3.0 fields from request body
     const {
       // Core fields
-      manufacturer, name, scale, mfcLink, mfcAuth, location, boxNumber, imageUrl,
+      manufacturer, name, scale, mfcLink, mfcAuth, imageUrl,
       // v3.0 fields
-      storageDetail, jan, mfcId,
+      jan, mfcId,
       // Schema v3: Array fields
       companyRoles, artistRoles, releases: releasesArray,
       // Schema v3: MFC-specific fields
@@ -521,6 +541,17 @@ export const createFigure = async (req: Request, res: Response) => {
       // Legacy
       type, description
     } = req.body;
+
+    // Validate tags if provided
+    if (tags) {
+      const { invalid } = validateTags(tags);
+      if (invalid.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid tags: ${invalid.join(', ')}`,
+        });
+      }
+    }
 
     // Schema v3: Derive manufacturer from companyRoles if not provided directly
     let resolvedManufacturer = manufacturer;
@@ -595,8 +626,6 @@ export const createFigure = async (req: Request, res: Response) => {
       name: name ? name.trim() : '',
       scale: scale ? scale.trim() : '',
       imageUrl: imageUrl ? imageUrl.trim() : '',
-      location: location ? location.trim() : '',
-      boxNumber: boxNumber ? boxNumber.trim() : ''
     };
     
     // If MFC link is provided, only scrape if there are missing fields to fill
@@ -709,11 +738,6 @@ export const createFigure = async (req: Request, res: Response) => {
       materials: materials || undefined,
       tags: tags && tags.length > 0 ? tags : undefined,
 
-      // Storage
-      location: finalData.location,
-      storageDetail: storageDetail || '',
-      boxNumber: finalData.boxNumber,
-
       // Media
       imageUrl: finalData.imageUrl,
 
@@ -743,7 +767,10 @@ export const createFigure = async (req: Request, res: Response) => {
       type: type || 'action figure',
       description: description
     });
-    
+
+    // Sync search index (fire-and-forget)
+    upsertFigureSearchIndex(figure).catch(() => {});
+
     return res.status(201).json({
       success: true,
       data: figure
@@ -784,9 +811,9 @@ export const updateFigure = async (req: Request, res: Response) => {
     // Destructure all v3.0 fields from request body
     const {
       // Core fields
-      manufacturer, name, scale, mfcLink, mfcAuth, location, boxNumber, imageUrl,
+      manufacturer, name, scale, mfcLink, mfcAuth, imageUrl,
       // v3.0 fields
-      storageDetail, jan, mfcId,
+      jan, mfcId,
       // Schema v3: Array fields
       companyRoles, artistRoles, releases: releasesArray,
       // Schema v3: MFC-specific fields
@@ -806,6 +833,17 @@ export const updateFigure = async (req: Request, res: Response) => {
       // Legacy
       type, description
     } = req.body;
+
+    // Validate tags if provided
+    if (tags) {
+      const { invalid } = validateTags(tags);
+      if (invalid.length > 0) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid tags: ${invalid.join(', ')}`,
+        });
+      }
+    }
 
     // Schema v3: Derive manufacturer from companyRoles if not provided directly
     let resolvedManufacturer = manufacturer;
@@ -835,8 +873,6 @@ export const updateFigure = async (req: Request, res: Response) => {
       name,
       scale,
       imageUrl,
-      location: location || '',
-      boxNumber: boxNumber || ''
     };
 
     // Only scrape if MFC link is provided, not empty, different from existing, and there are missing fields
@@ -947,11 +983,6 @@ export const updateFigure = async (req: Request, res: Response) => {
         materials: materials !== undefined ? (materials || undefined) : figure.materials,
         tags: tags !== undefined ? (tags && tags.length > 0 ? tags : undefined) : figure.tags,
 
-        // Storage
-        location: finalData.location,
-        storageDetail: storageDetail !== undefined ? storageDetail : figure.storageDetail,
-        boxNumber: finalData.boxNumber,
-
         // Media
         imageUrl: finalData.imageUrl,
 
@@ -982,6 +1013,11 @@ export const updateFigure = async (req: Request, res: Response) => {
       },
       { new: true }
     );
+
+    // Sync search index (fire-and-forget)
+    if (figure) {
+      upsertFigureSearchIndex(figure).catch(() => {});
+    }
 
     return res.status(200).json({
       success: true,
@@ -1022,72 +1058,15 @@ export const deleteFigure = async (req: Request, res: Response) => {
 
     // Delete from MongoDB
     await Figure.deleteOne({ _id: req.params.id }); // NOSONAR - Mongoose ODM (parameterized)
-    
+
+    // Sync search index (fire-and-forget)
+    try {
+      deleteFigureSearchIndex(new mongoose.Types.ObjectId(req.params.id as string)).catch(() => {});
+    } catch { /* ignore ObjectId conversion errors */ }
+
     return res.status(200).json({
       success: true,
       message: 'Figure removed successfully'
-    });
-  } catch (error: any) {
-    return res.status(500).json({
-      success: false,
-      message: 'Server Error',
-      error: error.message
-    });
-  }
-};
-
-// Search figures using MongoDB Atlas Search (delegated to searchService)
-export const searchFigures = async (req: Request, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: 'User not authenticated'
-      });
-    }
-    const userId = req.user.id;
-    const { query } = req.query;
-
-    if (!query) {
-      return res.status(400).json({
-        success: false,
-        message: 'Search query is required'
-      });
-    }
-
-    // Convert userId to ObjectId for the filter
-    let userObjectId: mongoose.Types.ObjectId;
-    try {
-      userObjectId = new mongoose.Types.ObjectId(userId);
-    } catch (error: any) {
-      logger.error('Invalid userId for ObjectId conversion:', error.message);
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid user identifier'
-      });
-    }
-
-    // Delegate to search service (handles Atlas Search vs regex fallback)
-    const searchResults = await figureSearch(query as string, userObjectId);
-
-    // Transform to match expected API format
-    const hits = searchResults.map(doc => ({
-      id: doc._id,
-      manufacturer: doc.manufacturer,
-      name: doc.name,
-      scale: doc.scale,
-      mfcLink: doc.mfcLink,
-      location: doc.location,
-      boxNumber: doc.boxNumber,
-      imageUrl: doc.imageUrl,
-      userId: doc.userId,
-      searchScore: (doc as any).searchScore
-    }));
-
-    return res.status(200).json({
-      success: true,
-      count: hits.length,
-      data: hits
     });
   } catch (error: any) {
     return res.status(500).json({
@@ -1108,7 +1087,7 @@ export const filterFigures = async (req: Request, res: Response) => {
       });
     }
     const userId = req.user.id;
-    const { manufacturer, scale, location, boxNumber, status, origin, category, distributor } = req.query;
+    const { manufacturer, scale, status, origin, category, distributor, tag, tagGroup, sculptor, illustrator, classification } = req.query;
 
     const query: any = { userId };
 
@@ -1130,11 +1109,18 @@ export const filterFigures = async (req: Request, res: Response) => {
     // Escape regex special characters in filter values (e.g., "1/7" contains "/")
     const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
 
-    // Support comma-separated values for multi-select faceted filtering
-    // e.g., manufacturer=Good+Smile+Company,Alter → matches either manufacturer
+    // Split multi-value filter params using pipe delimiter (preferred) or comma (legacy)
+    // Pipe avoids collision with commas in values like "Kanojo, Okarishimasu"
+    const splitFilterValues = (value: string): string[] => {
+      // Always split on pipe — commas may appear inside values (e.g., "Kanojo, Okarishimasu")
+      return value.split('|').map(v => v.trim()).filter(Boolean);
+    };
+
+    // Support pipe-separated (or comma-separated) values for multi-select faceted filtering
+    // e.g., manufacturer=Good+Smile+Company|Alter → matches either manufacturer
     // Search BOTH legacy manufacturer field AND companyRoles with Manufacturer role
     if (manufacturer) {
-      const values = (manufacturer as string).split(',').map(v => v.trim()).filter(Boolean);
+      const values = splitFilterValues(manufacturer as string);
       const manufacturerPatterns = values.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'));
 
       // Match either legacy manufacturer OR companyRoles with Manufacturer role
@@ -1158,7 +1144,7 @@ export const filterFigures = async (req: Request, res: Response) => {
 
     // Filter by distributor (Schema v3 companyRoles with Distributor role)
     if (distributor) {
-      const values = (distributor as string).split(',').map(v => v.trim()).filter(Boolean);
+      const values = splitFilterValues(distributor as string);
       const distributorPatterns = values.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'));
 
       query.$and = query.$and || [];
@@ -1172,7 +1158,7 @@ export const filterFigures = async (req: Request, res: Response) => {
       });
     }
     if (scale) {
-      const values = (scale as string).split(',').map(v => v.trim()).filter(Boolean);
+      const values = splitFilterValues(scale as string);
       // Handle special "__unspecified__" value for null/empty scales
       const hasUnspecified = values.includes('__unspecified__');
       const specifiedValues = values.filter(v => v !== '__unspecified__');
@@ -1196,15 +1182,16 @@ export const filterFigures = async (req: Request, res: Response) => {
           : { $regex: `^${escapeRegex(specifiedValues[0])}$`, $options: 'i' };
       }
     }
-    if (location) {
-      const values = (location as string).split(',').map(v => v.trim()).filter(Boolean);
-      query.location = values.length > 1
-        ? { $in: values.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i')) }
-        : { $regex: values[0], $options: 'i' };
+    // Tag filter: exact match in tags array
+    if (tag) {
+      query.tags = tag as string;
     }
-    if (boxNumber) query.boxNumber = { $regex: boxNumber as string, $options: 'i' };
+    // Tag group filter: prefix match on tags (e.g., "character" matches "character:miku")
+    if (tagGroup) {
+      query.tags = { $regex: `^${tagGroup as string}:`, $options: 'i' };
+    }
     if (origin) {
-      const values = (origin as string).split(',').map(v => v.trim()).filter(Boolean);
+      const values = splitFilterValues(origin as string);
       // Handle special "__unspecified__" value for null/empty origins
       const hasUnspecified = values.includes('__unspecified__');
       const specifiedValues = values.filter(v => v !== '__unspecified__');
@@ -1222,7 +1209,7 @@ export const filterFigures = async (req: Request, res: Response) => {
       }
     }
     if (category) {
-      const values = (category as string).split(',').map(v => v.trim()).filter(Boolean);
+      const values = splitFilterValues(category as string);
       // Handle special "__unspecified__" value for null/empty categories
       const hasUnspecified = values.includes('__unspecified__');
       const specifiedValues = values.filter(v => v !== '__unspecified__');
@@ -1235,6 +1222,57 @@ export const filterFigures = async (req: Request, res: Response) => {
         query.category = { $in: [null, ''] };
       } else {
         query.category = specifiedValues.length > 1
+          ? { $in: specifiedValues.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i')) }
+          : { $regex: `^${escapeRegex(specifiedValues[0])}$`, $options: 'i' };
+      }
+    }
+
+    // Filter by sculptor (Schema v3 artistRoles with Sculptor role)
+    if (sculptor) {
+      const values = splitFilterValues(sculptor as string);
+      const sculptorPatterns = values.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'));
+
+      query.$and = query.$and || [];
+      query.$and.push({
+        artistRoles: {
+          $elemMatch: {
+            roleName: 'Sculptor',
+            artistName: values.length > 1 ? { $in: sculptorPatterns } : sculptorPatterns[0]
+          }
+        }
+      });
+    }
+
+    // Filter by illustrator (Schema v3 artistRoles with Illustrator role)
+    if (illustrator) {
+      const values = splitFilterValues(illustrator as string);
+      const illustratorPatterns = values.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'));
+
+      query.$and = query.$and || [];
+      query.$and.push({
+        artistRoles: {
+          $elemMatch: {
+            roleName: 'Illustrator',
+            artistName: values.length > 1 ? { $in: illustratorPatterns } : illustratorPatterns[0]
+          }
+        }
+      });
+    }
+
+    // Filter by classification
+    if (classification) {
+      const values = splitFilterValues(classification as string);
+      const hasUnspecified = values.includes('__unspecified__');
+      const specifiedValues = values.filter(v => v !== '__unspecified__');
+
+      if (hasUnspecified && specifiedValues.length > 0) {
+        query.classification = {
+          $in: [null, '', ...specifiedValues.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i'))]
+        };
+      } else if (hasUnspecified) {
+        query.classification = { $in: [null, ''] };
+      } else {
+        query.classification = specifiedValues.length > 1
           ? { $in: specifiedValues.map(v => new RegExp(`^${escapeRegex(v)}$`, 'i')) }
           : { $regex: `^${escapeRegex(specifiedValues[0])}$`, $options: 'i' };
       }
@@ -1262,7 +1300,7 @@ export const filterFigures = async (req: Request, res: Response) => {
 
     // Validate sortBy parameter
     const sortByParam = req.query.sortBy as string;
-    const validSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
+    const validSortFields = ['createdAt', 'updatedAt', 'name', 'manufacturer', 'scale', 'activity'];
     if (sortByParam && !validSortFields.includes(sortByParam)) {
       return res.status(400).json({
         success: false,
@@ -1283,7 +1321,7 @@ export const filterFigures = async (req: Request, res: Response) => {
 
     const validPage = page || 1;
     const validLimit = limit || 10;
-    const validSortBy = sortByParam || 'createdAt';
+    const validSortBy = sortByParam || 'activity';
     const validSortOrder = sortOrderParam === 'asc' ? 1 : -1;
     const skip = (validPage - 1) * validLimit;
 
@@ -1300,12 +1338,15 @@ export const filterFigures = async (req: Request, res: Response) => {
     }
 
     // Build dynamic sort object - use allowlist guard for property injection safety
-    const allowedSortFields = ['createdAt', 'name', 'manufacturer', 'scale', 'price'];
-    const safeSortBy = allowedSortFields.includes(validSortBy) ? validSortBy : 'createdAt';
-    const sortOptions: Record<string, 1 | -1> = { [safeSortBy]: validSortOrder };
+    // Map 'activity' to actual DB field 'mfcActivityOrder'
+    const allowedSortFields = ['createdAt', 'updatedAt', 'name', 'manufacturer', 'scale', 'activity'];
+    const safeSortBy = allowedSortFields.includes(validSortBy) ? validSortBy : 'activity';
+    const dbSortField = safeSortBy === 'activity' ? 'mfcActivityOrder' : safeSortBy;
+    const sortOptions: Record<string, 1 | -1> = { [dbSortField]: validSortOrder };
 
     const figures = await Figure.find(query)
       .sort(sortOptions)
+      .collation({ locale: 'en', strength: 2 })
       .skip(skip)
       .limit(validLimit);
 
@@ -1326,165 +1367,3 @@ export const filterFigures = async (req: Request, res: Response) => {
   }
 };
 
-// Get statistics
-// Accepts optional ?status=owned|ordered|wished to filter stats by collection status
-export const getFigureStats = async (req: Request, res: Response) => {
-  try {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: 'User not authenticated'
-      });
-    }
-    const userId = req.user.id;
-    let userObjectId: mongoose.Types.ObjectId;
-
-    try {
-      userObjectId = new mongoose.Types.ObjectId(userId);
-    } catch (error: any) {
-      logger.error('Invalid userId for ObjectId conversion:', error.message);
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid user identifier'
-      });
-    }
-
-    // Optional collection status filter
-    const statusFilter = req.query.status as string | undefined;
-    const validStatuses = ['owned', 'ordered', 'wished'];
-    const collectionStatus = statusFilter && validStatuses.includes(statusFilter) ? statusFilter : undefined;
-
-    // Base match filter - always filter by user
-    // Handle legacy figures: null/undefined collectionStatus treated as 'owned'
-    const baseMatch: Record<string, any> = { userId: userObjectId };
-    if (collectionStatus) {
-      if (collectionStatus === 'owned') {
-        baseMatch.$or = [
-          { collectionStatus: 'owned' },
-          { collectionStatus: { $exists: false } },
-          { collectionStatus: null }
-        ];
-      } else {
-        baseMatch.collectionStatus = collectionStatus;
-      }
-    }
-
-    // Status counts (always return all three, unfiltered by status param)
-    // Legacy figures with null/undefined collectionStatus are counted as 'owned'
-    const statusCounts = await Figure.aggregate([
-      { $match: { userId: userObjectId } },
-      {
-        $group: {
-          _id: {
-            $ifNull: ['$collectionStatus', 'owned']
-          },
-          count: { $sum: 1 }
-        }
-      }
-    ]);
-    const statusCountsMap = {
-      owned: 0,
-      ordered: 0,
-      wished: 0
-    };
-    statusCounts.forEach((s: { _id: string; count: number }) => {
-      if (s._id && validStatuses.includes(s._id)) {
-        statusCountsMap[s._id as keyof typeof statusCountsMap] = s.count;
-      }
-    });
-
-    // Total count (filtered by status if provided)
-    const totalCount = await Figure.countDocuments(baseMatch);
-
-    // Count by manufacturer (filtered)
-    const manufacturerStats = await Figure.aggregate([
-      { $match: baseMatch },
-      { $group: { _id: '$manufacturer', count: { $sum: 1 } } },
-      { $sort: { count: -1 } }
-    ]);
-
-    // Count by scale (filtered)
-    const scaleStats = await Figure.aggregate([
-      { $match: baseMatch },
-      { $group: { _id: '$scale', count: { $sum: 1 } } },
-      { $sort: { count: -1 } }
-    ]);
-
-    // Count by location (filtered)
-    const locationStats = await Figure.aggregate([
-      { $match: baseMatch },
-      { $group: { _id: '$location', count: { $sum: 1 } } },
-      { $sort: { count: -1 } }
-    ]);
-
-    // Count by origin/franchise (filtered) - Schema v3
-    const originStats = await Figure.aggregate([
-      { $match: baseMatch },
-      { $group: { _id: '$origin', count: { $sum: 1 } } },
-      { $sort: { count: -1 } }
-    ]);
-
-    // Count by category/type (filtered) - Schema v3
-    const categoryStats = await Figure.aggregate([
-      { $match: baseMatch },
-      { $group: { _id: '$category', count: { $sum: 1 } } },
-      { $sort: { count: -1 } }
-    ]);
-
-    // Schema v3: Count manufacturers from companyRoles (filtered)
-    // This groups by companyName where roleName is 'Manufacturer'
-    const v3ManufacturerStats = await Figure.aggregate([
-      { $match: baseMatch },
-      { $unwind: { path: '$companyRoles', preserveNullAndEmptyArrays: false } },
-      { $match: { 'companyRoles.roleName': 'Manufacturer' } },
-      {
-        $group: {
-          _id: '$companyRoles.companyName',
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { count: -1 } }
-    ]);
-
-    // Schema v3: Count distributors from companyRoles (filtered)
-    const distributorStats = await Figure.aggregate([
-      { $match: baseMatch },
-      { $unwind: { path: '$companyRoles', preserveNullAndEmptyArrays: false } },
-      { $match: { 'companyRoles.roleName': 'Distributor' } },
-      {
-        $group: {
-          _id: '$companyRoles.companyName',
-          count: { $sum: 1 }
-        }
-      },
-      { $sort: { count: -1 } }
-    ]);
-
-    // Prevent caching of stats - always fetch fresh data
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-
-    return res.status(200).json({
-      success: true,
-      data: {
-        totalCount,
-        statusCounts: statusCountsMap,
-        manufacturerStats,
-        v3ManufacturerStats,
-        distributorStats,
-        scaleStats,
-        locationStats,
-        originStats,
-        categoryStats,
-        activeStatus: collectionStatus || null
-      }
-    });
-  } catch (error: any) {
-    return res.status(500).json({
-      success: false,
-      message: 'Server Error',
-      error: error.message
-    });
-  }
-};
