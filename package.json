@@ -19,6 +19,8 @@
     "test:ci": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory node node_modules/jest/bin/jest.js --ci --coverage --testPathIgnorePatterns='cross-service|inter-service|performance'"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "^2.11.0",
+    "@grpc/grpc-js": "^1.14.3",
     "@simplewebauthn/browser": "^13.2.2",
     "@simplewebauthn/server": "^13.2.3",
     "axios": "^1.13.5",
@@ -52,6 +54,7 @@
     "ts-jest": "^29.4.6",
     "ts-node": "^10.9.1",
     "ts-node-dev": "^2.0.0",
+    "ts-proto": "^2.11.5",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   },

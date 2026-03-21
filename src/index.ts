@@ -15,6 +15,7 @@ import { connectDB } from './config/db';
 import { globalErrorHandler } from './middleware/validationMiddleware';
 import * as packageJson from '../package.json';
 import { createLogger } from './utils/logger';
+import { closeScraperGrpcClient } from './grpc/client';
 
 const logger = createLogger('MAIN');
 const registerLogger = createLogger('REGISTER');
@@ -141,6 +142,10 @@ const gracefulShutdown = async (signal: string) => {
       logger.info('HTTP server closed');
     });
   }
+
+  // Close gRPC client connection
+  closeScraperGrpcClient();
+  logger.info('gRPC client closed');
 
   // Close MongoDB connection
   try {
