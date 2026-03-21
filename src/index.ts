@@ -15,6 +15,7 @@ import pushRoutes from './routes/pushRoutes';
 import { connectDB } from './config/db';
 import { globalErrorHandler } from './middleware/validationMiddleware';
 import { initializePushService } from './services/pushService';
+import { getPriceMonitor } from './services/priceMonitorService';
 import * as packageJson from '../package.json';
 import { createLogger } from './utils/logger';
 
@@ -145,6 +146,9 @@ const gracefulShutdown = async (signal: string) => {
     });
   }
 
+  // Stop price monitoring scheduler
+  getPriceMonitor().stop();
+
   // Close MongoDB connection
   try {
     await mongoose.connection.close();
@@ -169,6 +173,9 @@ const startServer = async () => {
 
     // Initialize push notification service (VAPID keys)
     initializePushService();
+
+    // Start price monitoring scheduler (non-blocking)
+    getPriceMonitor().start();
 
     // Now start the HTTP server
     server = app.listen(PORT, () => {

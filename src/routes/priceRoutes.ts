@@ -15,6 +15,7 @@ import {
   deleteAlert
 } from '../controllers/priceController';
 import { getCurrencyService } from '../services/currencyService';
+import { getPriceMonitor } from '../services/priceMonitorService';
 import { protect } from '../middleware/authMiddleware';
 import { validateObjectId } from '../middleware/validationMiddleware';
 
@@ -120,5 +121,29 @@ router.get('/alerts', getAlerts);
 router.post('/alerts', createAlert);
 router.put('/alerts/:alertId', updateAlert);
 router.delete('/alerts/:alertId', deleteAlert);
+
+// ─── Monitor (admin) ────────────────────────────────────────────────────────
+
+// POST /prices/monitor/run — manually trigger a monitoring cycle (auth required)
+router.post('/monitor/run', async (req, res) => {
+  try {
+    const result = await getPriceMonitor().runCycle();
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to run monitoring cycle',
+      error: error.message,
+    });
+  }
+});
+
+// GET /prices/monitor/status — get scheduler status
+router.get('/monitor/status', (req, res) => {
+  res.json({
+    success: true,
+    status: 'active',
+  });
+});
 
 export default router;
