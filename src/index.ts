@@ -13,6 +13,7 @@ import lookupRoutes from './routes/lookupRoutes';
 import listRoutes from './routes/listRoutes';
 import pushRoutes from './routes/pushRoutes';
 import analyticsRoutes from './routes/analyticsRoutes';
+import exportRoutes from './routes/exportRoutes';
 import { connectDB } from './config/db';
 import { globalErrorHandler } from './middleware/validationMiddleware';
 import { initializePushService } from './services/pushService';
@@ -56,6 +57,7 @@ app.use('/lookup', lookupRoutes);
 app.use('/lists', listRoutes);
 app.use('/push', pushRoutes);
 app.use('/analytics', analyticsRoutes);
+app.use('/export', exportRoutes);
 app.use('/', publicConfigRouter);
 
 // Health check endpoint - validates MongoDB connection
