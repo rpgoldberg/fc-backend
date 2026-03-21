@@ -8,6 +8,11 @@
  * 3. Ensure cookies are passed per-request (ephemeral, not stored)
  * 4. Receive webhooks from scraper on item completion
  * 5. Stream real-time progress to frontend via SSE
+ *
+ * When USE_GRPC=true, sync operations use gRPC streaming instead of
+ * REST proxy + webhook callbacks. The gRPC path delivers events via a
+ * server-streaming RPC, replacing the webhook->SSE relay with a direct
+ * gRPC stream->SSE broadcast.
  */
 import express, { Response } from 'express';
 import crypto from 'crypto';
@@ -18,6 +23,8 @@ import mongoose from 'mongoose';
 import { syncLogger } from '../utils/logger';
 import { upsertFigureSearchIndex } from '../services/searchIndexService';
 import { parseDimensionsString } from '../utils/parseDimensions';
+import { isGrpcEnabled, getScraperClient } from '../grpc';
+import type { SyncEvent, CancellableAsyncIterable } from '../grpc';
 
 // Interface for scraped company/artist data from scraper
 interface IScrapedCompany {
@@ -127,6 +134,216 @@ async function processScrapedArtists(
   return artistRoles;
 }
 
+// Store for active SSE connections by sessionId
+const sseConnections = new Map<string, Set<Response>>();
+
+/**
+ * Broadcast SSE event to all connected clients for a sessionId.
+ */
+export const broadcastToSession = (sessionId: string, event: string, data: unknown): void => {
+  const connections = sseConnections.get(sessionId);
+  if (!connections || connections.size === 0) return;
+  const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  for (const res of connections) {
+    try { res.write(message); } catch { /* closed */ }
+  }
+};
+
+// ============================================================================
+// SHARED EVENT HANDLERS
+// Used by both webhook endpoints (REST) and gRPC stream consumers.
+// ============================================================================
+
+/** Handle an item-complete event: update SyncJob, upsert Figure/MFCItem, broadcast SSE. */
+export async function handleItemCompleteEvent(
+  sessionId: string, mfcId: string, status: SyncItemStatus,
+  itemError: string | undefined, scrapedData: Record<string, unknown> | undefined
+): Promise<void> {
+  const job = await SyncJob.findOne({ sessionId });
+  if (!job) { console.error(`[SYNC-EVENT] SyncJob not found: ${JSON.stringify(sessionId)}`); return; }
+  syncLogger.webhookReceived(sessionId, mfcId);
+  await job.updateItemStatus(mfcId, status, itemError);
+  if (status === 'completed' && scrapedData) {
+    try {
+      const jobItem = job.items.find((i: { mfcId: string }) => i.mfcId === mfcId);
+      if (!jobItem?.isOrphan) {
+        const collectionStatus = jobItem?.collectionStatus || 'owned';
+        const figureData: Record<string, unknown> = {
+          mfcId: parseInt(mfcId, 10), mfcLink: `https://myfigurecollection.net/item/${mfcId}`, collectionStatus,
+        };
+        if (jobItem?.mfcActivityOrder !== undefined) figureData.mfcActivityOrder = jobItem.mfcActivityOrder;
+        if (scrapedData.name) figureData.name = scrapedData.name;
+        if (scrapedData.manufacturer) figureData.manufacturer = scrapedData.manufacturer;
+        if (scrapedData.scale) figureData.scale = scrapedData.scale;
+        if (scrapedData.imageUrl) figureData.imageUrl = scrapedData.imageUrl;
+        if (scrapedData.description) figureData.description = scrapedData.description;
+        if (scrapedData.releases) figureData.releases = scrapedData.releases;
+        if (scrapedData.jan) figureData.jan = scrapedData.jan;
+        if (scrapedData.mfcTitle) figureData.mfcTitle = scrapedData.mfcTitle;
+        if (scrapedData.origin) figureData.origin = scrapedData.origin;
+        if (scrapedData.version) figureData.version = scrapedData.version;
+        if (scrapedData.category) figureData.category = scrapedData.category;
+        if (scrapedData.classification) figureData.classification = scrapedData.classification;
+        if (scrapedData.materials) figureData.materials = scrapedData.materials;
+        if (scrapedData.dimensions && typeof scrapedData.dimensions === 'string') {
+          const parsed = parseDimensionsString(scrapedData.dimensions as string);
+          if (parsed) figureData.dimensions = parsed;
+        }
+        if (scrapedData.tags && Array.isArray(scrapedData.tags)) figureData.tags = scrapedData.tags;
+        if (scrapedData.userScore && typeof scrapedData.userScore === 'number') figureData.rating = scrapedData.userScore;
+        if (scrapedData.userWishRating && typeof scrapedData.userWishRating === 'number') figureData.wishRating = scrapedData.userWishRating;
+        if (scrapedData.companies && Array.isArray(scrapedData.companies) && scrapedData.companies.length > 0) {
+          const { companyRoles, manufacturer } = await processScrapedCompanies(scrapedData.companies as IScrapedCompany[]);
+          figureData.companyRoles = companyRoles;
+          if (!figureData.manufacturer && manufacturer) figureData.manufacturer = manufacturer;
+        }
+        if (scrapedData.artists && Array.isArray(scrapedData.artists) && scrapedData.artists.length > 0) {
+          figureData.artistRoles = await processScrapedArtists(scrapedData.artists as IScrapedArtist[]);
+        }
+        const result = await Figure.findOneAndUpdate(
+          { userId: job.userId, mfcId: parseInt(mfcId, 10) },
+          { $set: figureData, $setOnInsert: { userId: job.userId } },
+          { upsert: true, new: true }
+        );
+        upsertFigureSearchIndex(result).catch(() => {});
+        syncLogger.itemSaved(sessionId, mfcId);
+      }
+      // Upsert MFCItem catalog for ALL items
+      const catalogData: Record<string, unknown> = { mfcId: parseInt(mfcId, 10), mfcUrl: `https://myfigurecollection.net/item/${mfcId}` };
+      if (scrapedData.name) catalogData.name = scrapedData.name;
+      if (scrapedData.scale) catalogData.scale = scrapedData.scale;
+      if (scrapedData.imageUrl) catalogData.imageUrls = [scrapedData.imageUrl];
+      if (scrapedData.tags) catalogData.tags = scrapedData.tags;
+      if (scrapedData.releases) catalogData.releases = scrapedData.releases;
+      if (scrapedData.companies) catalogData.companies = scrapedData.companies;
+      if (scrapedData.artists) catalogData.artists = scrapedData.artists;
+      if (scrapedData.dimensions) catalogData.dimensions = scrapedData.dimensions;
+      if (scrapedData.communityStats) catalogData.communityStats = scrapedData.communityStats;
+      if (scrapedData.relatedItems) catalogData.relatedItems = scrapedData.relatedItems;
+      catalogData.lastScrapedAt = new Date();
+      MFCItem.findOneAndUpdate({ mfcId: parseInt(mfcId, 10) }, { $set: catalogData }, { upsert: true }).catch(() => {});
+    } catch (saveError: any) {
+      console.error(`[SYNC-EVENT] Failed to save figure ${JSON.stringify(mfcId)}: ${JSON.stringify(saveError.message)}`);
+      syncLogger.itemFailed(sessionId, mfcId, 'save_error', saveError.message);
+    }
+  }
+  broadcastToSession(sessionId, 'item-update', { mfcId, status, error: itemError, stats: job.stats, phase: job.phase });
+  if (job.phase === 'completed' || job.phase === 'failed') {
+    syncLogger.jobComplete(sessionId, job.stats.completed, job.stats.failed, job.stats.total);
+    broadcastToSession(sessionId, 'sync-complete', { phase: job.phase, stats: job.stats, message: job.message });
+  }
+}
+
+/** Handle a phase-change event: update SyncJob phase/items, broadcast SSE. */
+export async function handlePhaseChangeEvent(
+  sessionId: string, phase: string, message: string | undefined,
+  items?: Array<{ mfcId: string; name?: string; collectionStatus: string; isNsfw?: boolean; mfcActivityOrder?: number; isOrphan?: boolean }>
+): Promise<void> {
+  const job = await SyncJob.findOne({ sessionId });
+  if (!job) { console.error(`[SYNC-EVENT] SyncJob not found: ${JSON.stringify(sessionId)}`); return; }
+  const terminalPhases = ['completed', 'failed', 'cancelled'];
+  if (terminalPhases.includes(phase)) {
+    const hasNoItems = !job.items || job.items.length === 0;
+    if (phase === 'completed' && hasNoItems) {
+      job.phase = 'completed'; job.message = message || 'Sync complete'; await job.save();
+      syncLogger.phaseChange(sessionId, 'completed', 0, 0);
+      broadcastToSession(sessionId, 'sync-complete', { phase: 'completed', message: job.message, stats: job.stats });
+      return;
+    }
+    console.warn(`[SYNC-EVENT] Ignoring terminal phase ${JSON.stringify(phase)} — completion determined by backend`);
+    return;
+  }
+  job.phase = phase as any;
+  if (message) job.message = message;
+  if (items && items.length > 0) {
+    job.items = items.map((item: any) => ({
+      mfcId: item.mfcId, name: item.name, status: 'pending' as SyncItemStatus,
+      collectionStatus: item.collectionStatus as 'owned' | 'wished' | 'ordered',
+      mfcActivityOrder: item.mfcActivityOrder, isNsfw: item.isNsfw || false, isOrphan: item.isOrphan || false, retryCount: 0
+    }));
+    job.recalculateStats();
+  }
+  await job.save();
+  syncLogger.phaseChange(sessionId, phase, job.stats?.completed, job.stats?.total);
+  broadcastToSession(sessionId, 'phase-change', { phase: job.phase, message: job.message, stats: job.stats });
+}
+
+/** Handle a lists-sync event: upsert MfcList records for the user. */
+export async function handleListsSyncEvent(
+  sessionId: string,
+  lists: Array<{ mfcId: number; name: string; teaser?: string; description?: string; privacy?: string; iconUrl?: string; itemCount?: number; itemMfcIds?: number[]; itemDetails?: Array<{ mfcId: number; name?: string; imageUrl?: string }>; mfcCreatedAt?: string }>
+): Promise<number> {
+  const job = await SyncJob.findOne({ sessionId });
+  if (!job) { console.error(`[SYNC-EVENT] SyncJob not found: ${JSON.stringify(sessionId)}`); return 0; }
+  const userId = job.userId;
+  let upsertCount = 0;
+  for (const listData of lists) {
+    const { mfcId, ...rest } = listData;
+    await MfcList.findOneAndUpdate(
+      { userId, mfcId },
+      { $set: { ...rest, userId, mfcId, itemCount: rest.itemMfcIds ? rest.itemMfcIds.length : (rest.itemCount || 0), lastSyncedAt: new Date() } },
+      { upsert: true, new: true }
+    );
+    upsertCount++;
+  }
+  console.log(`[SYNC-EVENT] lists-sync: upserted ${upsertCount} lists for session ${JSON.stringify(sessionId)}`);
+  return upsertCount;
+}
+
+/** Process a gRPC SyncEvent stream in the background. Routes events to shared handlers. */
+export async function processGrpcSyncStream(stream: CancellableAsyncIterable<SyncEvent>, sessionId: string): Promise<void> {
+  try {
+    for await (const event of stream) {
+      if (!event.event) continue;
+      switch (event.event.$case) {
+        case 'phaseChange': {
+          const pc = event.event.phaseChange;
+          await handlePhaseChangeEvent(sessionId, pc.phase, pc.message,
+            pc.items?.map((i: { mfcId: string; name: string; collectionStatus: string; isNsfw: boolean; mfcActivityOrder: number; isOrphan: boolean }) => ({
+              mfcId: i.mfcId, name: i.name, collectionStatus: i.collectionStatus, isNsfw: i.isNsfw, mfcActivityOrder: i.mfcActivityOrder, isOrphan: i.isOrphan,
+            })));
+          break;
+        }
+        case 'itemComplete': {
+          const ic = event.event.itemComplete;
+          await handleItemCompleteEvent(sessionId, ic.mfcId, 'completed', undefined, ic.data as Record<string, unknown> | undefined);
+          break;
+        }
+        case 'itemFailed': {
+          const ifail = event.event.itemFailed;
+          await handleItemCompleteEvent(sessionId, ifail.mfcId, 'failed', ifail.error, undefined);
+          break;
+        }
+        case 'itemSkipped': {
+          const iskip = event.event.itemSkipped;
+          await handleItemCompleteEvent(sessionId, iskip.mfcId, 'skipped' as SyncItemStatus, iskip.reason, undefined);
+          break;
+        }
+        case 'listsSync': { await handleListsSyncEvent(sessionId, event.event.listsSync.lists); break; }
+        case 'summary': {
+          const sum = event.event.summary;
+          broadcastToSession(sessionId, 'sync-complete', { phase: 'completed', stats: { total: sum.totalItems, completed: sum.completed, failed: sum.failed, skipped: sum.skipped }, durationMs: sum.durationMs });
+          break;
+        }
+        case 'error': {
+          const se = event.event.error;
+          console.error(`[GRPC-STREAM] Sync error for ${sessionId}: ${se.code} - ${se.message}`);
+          broadcastToSession(sessionId, 'sync-error', { code: se.code, message: se.message, retryable: se.retryable });
+          break;
+        }
+        case 'sessionPaused': {
+          const sp = event.event.sessionPaused;
+          broadcastToSession(sessionId, 'session-paused', { sessionId: sp.sessionId, reason: sp.reason });
+          break;
+        }
+      }
+    }
+  } catch (err: any) {
+    console.error(`[GRPC-STREAM] Stream error for session ${sessionId}:`, err.message);
+    broadcastToSession(sessionId, 'sync-error', { code: 'STREAM_ERROR', message: err.message || 'gRPC stream failed', retryable: true });
+  }
+}
+
 const router = express.Router();
 
 // General rate limiter for user-facing sync routes
@@ -141,9 +358,6 @@ const generalSyncLimiter = rateLimit({
   skip: (req) => req.path.startsWith('/webhook/'),
 });
 router.use(generalSyncLimiter);
-
-// Store for active SSE connections by sessionId
-const sseConnections = new Map<string, Set<Response>>();
 
 // Webhook secret for scraper→backend communication
 // In production, this should be in environment variables
@@ -268,11 +482,16 @@ router.post('/validate-cookies', protect, validationLimiter, async (req, res) =>
       });
     }
 
+    if (isGrpcEnabled()) {
+      const client = getScraperClient();
+      const result = await client.validateCookies({ cookies, sessionId: req.body.sessionId || '', userId: userId || '', forceRevalidate: false, structureOnly: false });
+      return res.json({ success: true, valid: result.valid, reason: result.reason });
+    }
     const result = await proxyToScraper('/sync/validate-cookies', 'POST', { cookies }, userId);
     return res.json(result);
   } catch (error: any) {
     console.error('[SYNC] validate-cookies error:', error.message);
-    return res.status(error.status || 500).json({
+    return res.status(error.statusCode || error.status || 500).json({
       success: false,
       message: error.message || 'Failed to validate cookies'
     });
@@ -295,11 +514,16 @@ router.post('/parse-csv', protect, async (req, res) => {
       });
     }
 
+    if (isGrpcEnabled()) {
+      const client = getScraperClient();
+      const result = await client.parseCsv({ csvContent, sessionId: req.body.sessionId || '' });
+      return res.json({ success: result.success, items: result.items, totalParsed: result.totalParsed, errorMessage: result.errorMessage });
+    }
     const result = await proxyToScraper('/sync/parse-csv', 'POST', { csvContent }, userId);
     return res.json(result);
   } catch (error: any) {
     console.error('[SYNC] parse-csv error:', error.message);
-    return res.status(error.status || 500).json({
+    return res.status(error.statusCode || error.status || 500).json({
       success: false,
       message: error.message || 'Failed to parse CSV'
     });
@@ -323,6 +547,17 @@ router.post('/from-csv', protect, syncLimiter, async (req, res) => {
       });
     }
 
+    if (isGrpcEnabled()) {
+      const client = getScraperClient();
+      const parseResult = await client.parseCsv({ csvContent, sessionId: sessionId || '' });
+      if (!parseResult.success || parseResult.items.length === 0) {
+        return res.json({ success: false, message: parseResult.errorMessage || 'No items parsed from CSV' });
+      }
+      const stream = client.syncFromCsv({ sessionId: sessionId || '', userId: userId || '', cookies: cookies || {}, items: parseResult.items });
+      res.json({ success: true, sessionId, message: 'CSV sync started via gRPC' });
+      processGrpcSyncStream(stream, sessionId).catch((err: any) => console.error('[SYNC] gRPC from-csv stream error:', err.message));
+      return;
+    }
     const result = await proxyToScraper('/sync/from-csv', 'POST', {
       csvContent,
       userId,
@@ -333,7 +568,7 @@ router.post('/from-csv', protect, syncLimiter, async (req, res) => {
     return res.json(result);
   } catch (error: any) {
     console.error('[SYNC] from-csv error:', error.message);
-    return res.status(error.status || 500).json({
+    return res.status(error.statusCode || error.status || 500).json({
       success: false,
       message: error.message || 'Failed to sync from CSV'
     });
@@ -368,6 +603,14 @@ router.post('/full', protect, syncLimiter, async (req, res) => {
       });
     }
 
+    if (isGrpcEnabled()) {
+      const client = getScraperClient();
+      const stream = client.executeFullSync({ sessionId, userId: userId || '', cookies, profileUrl: '' });
+      res.json({ success: true, sessionId, message: 'Sync started via gRPC' });
+      processGrpcSyncStream(stream, sessionId).catch((err: any) => console.error('[SYNC] gRPC full sync stream error:', err.message));
+      return;
+    }
+
     // Construct webhook URL for scraper callbacks
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:5080';
     const webhookUrl = `${backendUrl}/sync/webhook`;
@@ -387,7 +630,7 @@ router.post('/full', protect, syncLimiter, async (req, res) => {
     return res.json(result);
   } catch (error: any) {
     console.error('[SYNC] full error:', error.message);
-    return res.status(error.status || 500).json({
+    return res.status(error.statusCode || error.status || 500).json({
       success: false,
       message: error.message || 'Failed to execute full sync'
     });
@@ -401,11 +644,16 @@ router.post('/full', protect, syncLimiter, async (req, res) => {
 router.get('/status', protect, async (req, res) => {
   try {
     const userId = (req as any).user?.id;
+    if (isGrpcEnabled()) {
+      const client = getScraperClient();
+      const result = await client.getSyncStatus({ sessionId: (req.query.sessionId as string) || '' });
+      return res.json({ success: true, ...result });
+    }
     const result = await proxyToScraper(`/sync/status?userId=${userId}`, 'GET', undefined, userId);
     return res.json(result);
   } catch (error: any) {
     console.error('[SYNC] status error:', error.message);
-    return res.status(error.status || 500).json({
+    return res.status(error.statusCode || error.status || 500).json({
       success: false,
       message: error.message || 'Failed to get sync status'
     });
@@ -419,11 +667,16 @@ router.get('/status', protect, async (req, res) => {
 router.get('/queue-stats', protect, async (req, res) => {
   try {
     const userId = (req as any).user?.id;
+    if (isGrpcEnabled()) {
+      const client = getScraperClient();
+      const result = await client.getQueueStats({});
+      return res.json({ success: true, ...result });
+    }
     const result = await proxyToScraper(`/sync/queue-stats?userId=${userId}`, 'GET', undefined, userId);
     return res.json(result);
   } catch (error: any) {
     console.error('[SYNC] queue-stats error:', error.message);
-    return res.status(error.status || 500).json({
+    return res.status(error.statusCode || error.status || 500).json({
       success: false,
       message: error.message || 'Failed to get queue stats'
     });
@@ -448,23 +701,6 @@ const verifyWebhookSignature = (signature: string | undefined, body: string): bo
     Buffer.from(signature),
     Buffer.from(expectedSignature)
   );
-};
-
-/**
- * Broadcast SSE event to all connected clients for a sessionId.
- */
-const broadcastToSession = (sessionId: string, event: string, data: unknown): void => {
-  const connections = sseConnections.get(sessionId);
-  if (!connections || connections.size === 0) return;
-
-  const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const res of connections) {
-    try {
-      res.write(message);
-    } catch {
-      // Connection closed, will be cleaned up on next heartbeat
-    }
-  }
 };
 
 /**
@@ -498,161 +734,15 @@ router.post('/webhook/item-complete', async (req, res) => {
       });
     }
 
-    // Find and update the SyncJob
+    // Verify SyncJob exists before delegating (webhooks need 404 response)
     const job = await SyncJob.findOne({ sessionId });
     if (!job) {
       console.error(`[WEBHOOK] SyncJob not found for session: ${JSON.stringify(sessionId)}`);
       return res.status(404).json({ success: false, message: 'SyncJob not found' });
     }
 
-    // Log webhook received
-    syncLogger.webhookReceived(sessionId, mfcId);
-
-    // Update item status
-    await job.updateItemStatus(mfcId, status, itemError);
-
-    // If item completed successfully and has scraped data, save/update records
-    if (status === 'completed' && scrapedData) {
-      try {
-        // Get the item from the job to find its collection status, activity order, and orphan flag
-        const jobItem = job.items.find((i: { mfcId: string }) => i.mfcId === mfcId);
-
-        // Orphan items (from lists, not in collection) only get MFCItem catalog enrichment.
-        // They do NOT get a user-specific Figure record.
-        if (!jobItem?.isOrphan) {
-          const collectionStatus = jobItem?.collectionStatus || 'owned';
-
-          // Map scraped data to Figure schema
-          const figureData: Record<string, unknown> = {
-            mfcId: parseInt(mfcId, 10),
-            mfcLink: `https://myfigurecollection.net/item/${mfcId}`,
-            collectionStatus,
-          };
-
-          // Activity ordering from MFC collection page sort
-          if (jobItem?.mfcActivityOrder !== undefined) {
-            figureData.mfcActivityOrder = jobItem.mfcActivityOrder;
-          }
-          // Add optional fields from scraped data
-          if (scrapedData.name) figureData.name = scrapedData.name;
-          if (scrapedData.manufacturer) figureData.manufacturer = scrapedData.manufacturer;
-          if (scrapedData.scale) figureData.scale = scrapedData.scale;
-          if (scrapedData.imageUrl) figureData.imageUrl = scrapedData.imageUrl;
-          if (scrapedData.description) figureData.description = scrapedData.description;
-          if (scrapedData.releases) figureData.releases = scrapedData.releases;
-          if (scrapedData.jan) figureData.jan = scrapedData.jan;
-
-          // Schema v3: Individual MFC fields
-          if (scrapedData.mfcTitle) figureData.mfcTitle = scrapedData.mfcTitle;
-          if (scrapedData.origin) figureData.origin = scrapedData.origin;
-          if (scrapedData.version) figureData.version = scrapedData.version;
-          if (scrapedData.category) figureData.category = scrapedData.category;
-          if (scrapedData.classification) figureData.classification = scrapedData.classification;
-          if (scrapedData.materials) figureData.materials = scrapedData.materials;
-          if (scrapedData.dimensions && typeof scrapedData.dimensions === 'string') {
-            const parsed = parseDimensionsString(scrapedData.dimensions as string);
-            if (parsed) {
-              figureData.dimensions = parsed;
-            }
-          }
-          if (scrapedData.tags && Array.isArray(scrapedData.tags)) {
-            figureData.tags = scrapedData.tags;
-          }
-
-          // User's personal ratings (only present when logged-in user has the figure)
-          if (scrapedData.userScore && typeof scrapedData.userScore === 'number') {
-            figureData.rating = scrapedData.userScore;
-          }
-          if (scrapedData.userWishRating && typeof scrapedData.userWishRating === 'number') {
-            figureData.wishRating = scrapedData.userWishRating;
-          }
-
-          // Schema v3: Process companies with roles
-          if (scrapedData.companies && Array.isArray(scrapedData.companies) && scrapedData.companies.length > 0) {
-            const { companyRoles, manufacturer } = await processScrapedCompanies(
-              scrapedData.companies as IScrapedCompany[]
-            );
-            figureData.companyRoles = companyRoles;
-
-            // Set legacy manufacturer from companies if not already set
-            if (!figureData.manufacturer && manufacturer) {
-              figureData.manufacturer = manufacturer;
-            }
-            console.log(`[WEBHOOK] Processed ${companyRoles.length} company roles for ${JSON.stringify(mfcId)}`);
-          }
-
-          // Schema v3: Process artists with roles
-          if (scrapedData.artists && Array.isArray(scrapedData.artists) && scrapedData.artists.length > 0) {
-            const artistRoles = await processScrapedArtists(
-              scrapedData.artists as IScrapedArtist[]
-            );
-            figureData.artistRoles = artistRoles;
-            console.log(`[WEBHOOK] Processed ${artistRoles.length} artist roles for ${JSON.stringify(mfcId)}`);
-          }
-
-          // Upsert: Update if exists for this user+mfcId, otherwise create
-          const result = await Figure.findOneAndUpdate(
-            { userId: job.userId, mfcId: parseInt(mfcId, 10) },
-            { $set: figureData, $setOnInsert: { userId: job.userId } },
-            { upsert: true, new: true }
-          );
-
-          // Sync search index (fire-and-forget)
-          upsertFigureSearchIndex(result).catch(() => {});
-
-          console.log(`[WEBHOOK] Figure ${JSON.stringify(mfcId)} saved/updated: ${result._id}`);
-          syncLogger.itemSaved(sessionId, mfcId);
-        } else {
-          console.log(`[WEBHOOK] Orphan item ${JSON.stringify(mfcId)} — enriching MFCItem catalog only (no Figure)`);
-        }
-
-        // Upsert shared MFCItem catalog entry — runs for ALL items (collection + orphans)
-        const catalogData: Record<string, unknown> = {
-          mfcId: parseInt(mfcId, 10),
-          mfcUrl: `https://myfigurecollection.net/item/${mfcId}`,
-        };
-        if (scrapedData.name) catalogData.name = scrapedData.name;
-        if (scrapedData.scale) catalogData.scale = scrapedData.scale;
-        if (scrapedData.imageUrl) catalogData.imageUrls = [scrapedData.imageUrl];
-        if (scrapedData.tags) catalogData.tags = scrapedData.tags;
-        if (scrapedData.releases) catalogData.releases = scrapedData.releases;
-        if (scrapedData.companies) catalogData.companies = scrapedData.companies;
-        if (scrapedData.artists) catalogData.artists = scrapedData.artists;
-        if (scrapedData.dimensions) catalogData.dimensions = scrapedData.dimensions;
-        if (scrapedData.communityStats) catalogData.communityStats = scrapedData.communityStats;
-        if (scrapedData.relatedItems) catalogData.relatedItems = scrapedData.relatedItems;
-        catalogData.lastScrapedAt = new Date();
-
-        MFCItem.findOneAndUpdate(
-          { mfcId: parseInt(mfcId, 10) },
-          { $set: catalogData },
-          { upsert: true }
-        ).catch(() => {});
-      } catch (saveError: any) {
-        console.error(`[WEBHOOK] Failed to save figure ${JSON.stringify(mfcId)}: ${JSON.stringify(saveError.message)}`);
-        syncLogger.itemFailed(sessionId, mfcId, 'save_error', saveError.message);
-        // Don't fail the webhook - the sync can continue
-      }
-    }
-
-    // Broadcast progress update to connected SSE clients
-    broadcastToSession(sessionId, 'item-update', {
-      mfcId,
-      status,
-      error: itemError,
-      stats: job.stats,
-      phase: job.phase
-    });
-
-    // If job is complete, broadcast completion event and log
-    if (job.phase === 'completed' || job.phase === 'failed') {
-      syncLogger.jobComplete(sessionId, job.stats.completed, job.stats.failed, job.stats.total);
-      broadcastToSession(sessionId, 'sync-complete', {
-        phase: job.phase,
-        stats: job.stats,
-        message: job.message
-      });
-    }
+    // Delegate to shared handler
+    await handleItemCompleteEvent(sessionId, mfcId, status, itemError, scrapedData);
 
     return res.json({ success: true });
   } catch (error: any) {
@@ -691,69 +781,24 @@ router.post('/webhook/phase-change', async (req, res) => {
       });
     }
 
+    // Verify SyncJob exists before delegating (webhooks need 404 response)
     const job = await SyncJob.findOne({ sessionId });
     if (!job) {
       return res.status(404).json({ success: false, message: 'SyncJob not found' });
     }
 
-    // Terminal phases (completed, failed, cancelled) should only be set internally
-    // by recalculateStats() when all items are done, or by the cancel endpoint.
-    // Exception: accept 'completed' from scraper when there are no items to enrich
-    // (e.g., lists-only sync where statusFilter is empty).
+    // Terminal phase check: webhooks need to return { ignored: true } for audit trail
     const terminalPhases = ['completed', 'failed', 'cancelled'];
     if (terminalPhases.includes(phase)) {
       const hasNoItems = !job.items || job.items.length === 0;
-      if (phase === 'completed' && hasNoItems) {
-        // No items means recalculateStats() will never trigger completion.
-        // Accept the scraper's completed phase directly.
-        job.phase = 'completed';
-        job.message = message || 'Sync complete';
-        await job.save();
-
-        syncLogger.phaseChange(sessionId, 'completed', 0, 0);
-        broadcastToSession(sessionId, 'sync-complete', {
-          phase: 'completed',
-          message: job.message,
-          stats: job.stats
-        });
-
-        return res.json({ success: true });
+      if (!(phase === 'completed' && hasNoItems)) {
+        console.warn(`[WEBHOOK] Ignoring terminal phase ${JSON.stringify(phase)} from scraper - completion is determined by backend`);
+        return res.json({ success: true, ignored: true });
       }
-
-      console.warn(`[WEBHOOK] Ignoring terminal phase ${JSON.stringify(phase)} from scraper - completion is determined by backend`);
-      return res.json({ success: true, ignored: true });
     }
 
-    // Update job phase (non-terminal phases only)
-    job.phase = phase as any;
-    if (message) job.message = message;
-
-    // If items provided (during queueing phase), add them
-    if (items && items.length > 0) {
-      job.items = items.map(item => ({
-        mfcId: item.mfcId,
-        name: item.name,
-        status: 'pending' as SyncItemStatus,
-        collectionStatus: item.collectionStatus as 'owned' | 'wished' | 'ordered',
-        mfcActivityOrder: item.mfcActivityOrder,
-        isNsfw: item.isNsfw || false,
-        isOrphan: item.isOrphan || false,
-        retryCount: 0
-      }));
-      job.recalculateStats();
-    }
-
-    await job.save();
-
-    // Log phase change
-    syncLogger.phaseChange(sessionId, phase, job.stats?.completed, job.stats?.total);
-
-    // Broadcast phase change
-    broadcastToSession(sessionId, 'phase-change', {
-      phase: job.phase,
-      message: job.message,
-      stats: job.stats
-    });
+    // Delegate to shared handler
+    await handlePhaseChangeEvent(sessionId, phase, message, items);
 
     return res.json({ success: true });
   } catch (error: any) {
@@ -802,36 +847,14 @@ router.post('/webhook/lists-sync', async (req, res) => {
       });
     }
 
-    // Look up SyncJob to get the userId
+    // Verify SyncJob exists before delegating (webhooks need 404 response)
     const job = await SyncJob.findOne({ sessionId });
     if (!job) {
       return res.status(404).json({ success: false, message: 'SyncJob not found' });
     }
 
-    const userId = job.userId;
-    let upsertCount = 0;
-
-    for (const listData of lists) {
-      const { mfcId, ...rest } = listData;
-
-      await MfcList.findOneAndUpdate(
-        { userId, mfcId },
-        {
-          $set: {
-            ...rest,
-            userId,
-            mfcId,
-            itemCount: rest.itemMfcIds ? rest.itemMfcIds.length : (rest.itemCount || 0),
-            lastSyncedAt: new Date()
-          }
-        },
-        { upsert: true, new: true }
-      );
-
-      upsertCount++;
-    }
-
-    console.log(`[WEBHOOK] lists-sync: upserted ${upsertCount} lists for session ${JSON.stringify(sessionId)}`);
+    // Delegate to shared handler
+    const upsertCount = await handleListsSyncEvent(sessionId, lists);
 
     return res.json({ success: true, upserted: upsertCount });
   } catch (error: any) {
@@ -1091,7 +1114,12 @@ router.delete('/job/:sessionId', protect, async (req, res) => {
 
     // Tell the scraper to cancel all pending items for this session
     try {
-      await proxyToScraper(`/sync/sessions/${sessionId}`, 'DELETE', undefined, userId);
+      if (isGrpcEnabled()) {
+        const client = getScraperClient();
+        await client.cancelSession({ sessionId });
+      } else {
+        await proxyToScraper(`/sync/sessions/${sessionId}`, 'DELETE', undefined, userId);
+      }
       console.log(`[SYNC] Notified scraper to cancel session ${JSON.stringify(sessionId)}`);
     } catch (scraperError: any) {
       // Don't fail if scraper is unavailable - still mark job as cancelled
@@ -1134,25 +1162,72 @@ router.delete('/job/:sessionId', protect, async (req, res) => {
 });
 
 // ============================================================================
+// SESSION MANAGEMENT ENDPOINTS (gRPC-first, REST fallback where available)
+// ============================================================================
+
+router.post('/sessions/:id/resume', protect, async (req, res) => {
+  try {
+    const sessionId = req.params.id as string;
+    if (isGrpcEnabled()) {
+      const client = getScraperClient();
+      const result = await client.resumeSession({ sessionId });
+      return res.json({ success: result.success, message: result.message });
+    }
+    return res.status(501).json({ success: false, message: 'Resume is only available when gRPC transport is enabled' });
+  } catch (error: any) {
+    console.error('[SYNC] resume session error:', error.message);
+    return res.status(error.statusCode || error.status || 500).json({ success: false, message: error.message || 'Failed to resume session' });
+  }
+});
+
+router.post('/sessions/:id/cancel-failed', protect, async (req, res) => {
+  try {
+    const sessionId = req.params.id as string;
+    if (isGrpcEnabled()) {
+      const client = getScraperClient();
+      const result = await client.cancelFailedItems({ sessionId });
+      return res.json({ success: result.success, cancelledCount: result.cancelledCount, message: result.message });
+    }
+    return res.status(501).json({ success: false, message: 'Cancel-failed is only available when gRPC transport is enabled' });
+  } catch (error: any) {
+    console.error('[SYNC] cancel-failed error:', error.message);
+    return res.status(error.statusCode || error.status || 500).json({ success: false, message: error.message || 'Failed to cancel failed items' });
+  }
+});
+
+router.delete('/sessions/:id', protect, async (req, res) => {
+  try {
+    const sessionId = req.params.id as string;
+    if (isGrpcEnabled()) {
+      const client = getScraperClient();
+      const result = await client.cancelSession({ sessionId });
+      return res.json({ success: result.success, cancelledCount: result.cancelledCount, message: result.message });
+    }
+    const userId = (req as any).user?.id;
+    const result = await proxyToScraper(`/sync/sessions/${sessionId}`, 'DELETE', undefined, userId);
+    return res.json(result);
+  } catch (error: any) {
+    console.error('[SYNC] cancel session error:', error.message);
+    return res.status(error.statusCode || error.status || 500).json({ success: false, message: error.message || 'Failed to cancel session' });
+  }
+});
+
+// ============================================================================
 // PUBLIC CONFIGURATION ENDPOINTS
 // ============================================================================
 
-/**
- * GET /sync/mfc/cookie-allowlist
- * Returns the list of allowed MFC cookies from the scraper.
- * Public endpoint - no auth required (it's just configuration).
- * Used by frontend to generate dynamic cookie extraction scripts.
- */
 router.get('/mfc/cookie-allowlist', async (req, res) => {
   try {
+    if (isGrpcEnabled()) {
+      const client = getScraperClient();
+      const result = await client.getCookieAllowlist({});
+      return res.json({ success: true, allowedCookieNames: result.allowedCookieNames });
+    }
     const result = await proxyToScraper('/mfc/cookie-allowlist', 'GET');
     return res.json(result);
   } catch (error: any) {
     console.error('[SYNC] cookie-allowlist error:', error.message);
-    return res.status(error.status || 500).json({
-      success: false,
-      message: error.message || 'Failed to get cookie allowlist'
-    });
+    return res.status(error.statusCode || error.status || 500).json({ success: false, message: error.message || 'Failed to get cookie allowlist' });
   }
 });
 

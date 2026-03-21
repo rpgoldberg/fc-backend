@@ -4,5 +4,5 @@ export function isGrpcEnabled(): boolean {
 }
 
 export { getScraperClient, ScraperGrpcClient } from './scraperClient';
-export type { GrpcMappedError, CancellableAsyncIterable } from './scraperClient';
+export type { GrpcMappedError, CancellableAsyncIterable, SyncEvent } from './scraperClient';
 export { closeScraperGrpcClient } from './client';

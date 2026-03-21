@@ -228,7 +228,7 @@ describe('Sync Routes - Webhook Item Complete', () => {
         expect(response.body.success).toBe(true);
         // The route uses a single template literal with JSON.stringify-wrapped values
         expect(consoleErrorSpy).toHaveBeenCalledWith(
-          expect.stringContaining('[WEBHOOK] Failed to save figure')
+          expect.stringContaining('Failed to save figure')
         );
       } finally {
         // Always restore mocks, even if assertions fail
