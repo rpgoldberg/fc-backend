@@ -16,7 +16,9 @@
     "test:all": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory node node_modules/jest/bin/jest.js --passWithNoTests --verbose --bail=false --runInBand",
     "test:coverage": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory node node_modules/jest/bin/jest.js --coverage --testPathIgnorePatterns='cross-service|inter-service|performance'",
     "test:watch": "node node_modules/jest/bin/jest.js --watch",
-    "test:ci": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory node node_modules/jest/bin/jest.js --ci --coverage --testPathIgnorePatterns='cross-service|inter-service|performance'"
+    "test:ci": "NODE_OPTIONS=--experimental-vm-modules TEST_MODE=memory node node_modules/jest/bin/jest.js --ci --coverage --testPathIgnorePatterns='cross-service|inter-service|performance'",
+    "seed": "npx ts-node scripts/seed.ts",
+    "seed:reset": "npx ts-node scripts/reset-dev.ts"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.2.2",
