@@ -11,8 +11,10 @@ import adminRoutes, { publicConfigRouter } from './routes/adminRoutes';
 import syncRoutes from './routes/syncRoutes';
 import lookupRoutes from './routes/lookupRoutes';
 import listRoutes from './routes/listRoutes';
+import pushRoutes from './routes/pushRoutes';
 import { connectDB } from './config/db';
 import { globalErrorHandler } from './middleware/validationMiddleware';
+import { initializePushService } from './services/pushService';
 import * as packageJson from '../package.json';
 import { createLogger } from './utils/logger';
 
@@ -50,6 +52,7 @@ app.use('/admin', adminRoutes);
 app.use('/sync', syncRoutes);
 app.use('/lookup', lookupRoutes);
 app.use('/lists', listRoutes);
+app.use('/push', pushRoutes);
 app.use('/', publicConfigRouter);
 
 // Health check endpoint - validates MongoDB connection
@@ -163,6 +166,9 @@ const startServer = async () => {
     // Connect to MongoDB before accepting requests
     await connectDB();
     logger.info('MongoDB connected successfully');
+
+    // Initialize push notification service (VAPID keys)
+    initializePushService();
 
     // Now start the HTTP server
     server = app.listen(PORT, () => {
