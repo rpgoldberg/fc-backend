@@ -411,6 +411,72 @@ export const getFigures = async (req: Request, res: Response) => {
       }
     }
 
+    // Build dynamic sort object - use allowlist guard for property injection safety
+    // Map 'activity' to actual DB field 'mfcActivityOrder'
+    const allowedSortFields = ['createdAt', 'updatedAt', 'name', 'manufacturer', 'scale', 'activity'];
+    const safeSortBy = allowedSortFields.includes(validSortBy) ? validSortBy : 'activity';
+    const dbSortField = safeSortBy === 'activity' ? 'mfcActivityOrder' : safeSortBy;
+    const sortOptions: Record<string, 1 | -1> = { [dbSortField]: validSortOrder };
+
+    // Check for cursor-based pagination (mobile API)
+    const cursor = (req as any).cursorPagination as { after?: string; before?: string; limit: number } | undefined;
+
+    if (cursor) {
+      // Cursor-based pagination path
+      const cursorLimit = cursor.limit;
+
+      // Apply cursor condition if after/before is provided
+      if (cursor.after) {
+        const afterDoc = await Figure.findById(cursor.after).select(dbSortField).lean();
+        if (afterDoc) {
+          const cursorValue = (afterDoc as any)[dbSortField];
+          const cursorCondition = validSortOrder === -1
+            ? { $or: [{ [dbSortField]: { $lt: cursorValue } }, { [dbSortField]: cursorValue, _id: { $gt: cursor.after } }] }
+            : { $or: [{ [dbSortField]: { $gt: cursorValue } }, { [dbSortField]: cursorValue, _id: { $gt: cursor.after } }] };
+          query.$and = query.$and ? [...query.$and, cursorCondition] : [cursorCondition];
+        }
+      } else if (cursor.before) {
+        const beforeDoc = await Figure.findById(cursor.before).select(dbSortField).lean();
+        if (beforeDoc) {
+          const cursorValue = (beforeDoc as any)[dbSortField];
+          const cursorCondition = validSortOrder === -1
+            ? { $or: [{ [dbSortField]: { $gt: cursorValue } }, { [dbSortField]: cursorValue, _id: { $lt: cursor.before } }] }
+            : { $or: [{ [dbSortField]: { $lt: cursorValue } }, { [dbSortField]: cursorValue, _id: { $lt: cursor.before } }] };
+          query.$and = query.$and ? [...query.$and, cursorCondition] : [cursorCondition];
+        }
+      }
+
+      // Build and execute cursor query
+      let figureQuery: any = Figure.find(query)
+        .sort(sortOptions)
+        .collation({ locale: 'en', strength: 2 })
+        .limit(cursorLimit + 1); // Fetch one extra to determine hasMore
+
+      // Apply field projection if set by fieldSelection middleware
+      const projection = (req as any).fieldProjection;
+      if (projection) {
+        figureQuery = figureQuery.select(projection);
+      }
+
+      const results = await figureQuery;
+      const hasMore = results.length > cursorLimit;
+      const figures = hasMore ? results.slice(0, cursorLimit) : results;
+
+      const total = await Figure.countDocuments({ userId }); // Total count without cursor filter
+
+      return res.status(200).json({
+        success: true,
+        figures,
+        pagination: {
+          hasMore,
+          nextCursor: figures.length > 0 ? (figures[figures.length - 1] as any)._id.toString() : null,
+          prevCursor: figures.length > 0 ? (figures[0] as any)._id.toString() : null,
+          total,
+        }
+      });
+    }
+
+    // Standard page-based pagination path
     const total = await Figure.countDocuments(query);
     const pages = Math.ceil(total / validLimit);
 
@@ -423,18 +489,19 @@ export const getFigures = async (req: Request, res: Response) => {
       });
     }
 
-    // Build dynamic sort object - use allowlist guard for property injection safety
-    // Map 'activity' to actual DB field 'mfcActivityOrder'
-    const allowedSortFields = ['createdAt', 'updatedAt', 'name', 'manufacturer', 'scale', 'activity'];
-    const safeSortBy = allowedSortFields.includes(validSortBy) ? validSortBy : 'activity';
-    const dbSortField = safeSortBy === 'activity' ? 'mfcActivityOrder' : safeSortBy;
-    const sortOptions: Record<string, 1 | -1> = { [dbSortField]: validSortOrder };
-
-    const figures = await Figure.find(query)
+    let figureQuery: any = Figure.find(query)
       .sort(sortOptions)
       .collation({ locale: 'en', strength: 2 })
       .skip(skip)
       .limit(validLimit);
+
+    // Apply field projection if set by fieldSelection middleware
+    const projection = (req as any).fieldProjection;
+    if (projection) {
+      figureQuery = figureQuery.select(projection);
+    }
+
+    const figures = await figureQuery;
 
     return res.status(200).json({
       success: true,

@@ -176,6 +176,20 @@ export const schemas = {
     // Collection status filter for owned/ordered/wished views
     status: Joi.string()
       .valid('owned', 'ordered', 'wished')
+      .optional(),
+    // Mobile API: field selection (comma-separated field names)
+    fields: Joi.string()
+      .trim()
+      .max(500)
+      .optional(),
+    // Mobile API: cursor-based pagination
+    after: Joi.string()
+      .trim()
+      .max(50)
+      .optional(),
+    before: Joi.string()
+      .trim()
+      .max(50)
       .optional()
   }).allow(null),
 

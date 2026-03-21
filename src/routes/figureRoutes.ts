@@ -18,6 +18,8 @@ import {
   validateContentType,
   validateObjectId
 } from '../middleware/validationMiddleware';
+import { fieldSelection } from '../middleware/fieldSelection';
+import { cursorPagination } from '../middleware/cursorPagination';
 
 const router = express.Router();
 
@@ -65,7 +67,12 @@ router.use(figureApiLimiter);
 router.use(protect);
 
 router.route('/')
-  .get(validateRequest(schemas.pagination, 'query'), getFigures)
+  .get(
+    validateRequest(schemas.pagination, 'query'),
+    fieldSelection(['_id', 'name', 'imageUrl', 'manufacturer', 'scale', 'collectionStatus', 'origin', 'category', 'releases', 'createdAt', 'updatedAt', 'companyRoles', 'artistRoles', 'mfcId']),
+    cursorPagination(),
+    getFigures
+  )
   .post(
     validateContentType(['application/json']),
     validateRequest(schemas.figureCreate),

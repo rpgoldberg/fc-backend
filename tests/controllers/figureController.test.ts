@@ -151,6 +151,107 @@ describe('FigureController', () => {
         error: 'An unexpected error occurred while fetching figures'
       });
     });
+
+    it('should apply field projection when fieldProjection is set on request', async () => {
+      const mockFigures = [
+        { _id: 'fig1', name: 'Miku', imageUrl: 'http://img.jpg' }
+      ];
+
+      const mockSelect = jest.fn().mockReturnThis();
+      const mockFind = {
+        sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        select: mockSelect,
+      };
+
+      // The chain ends at select, so limit returns the chain and select resolves
+      mockFind.limit = jest.fn().mockReturnValue(mockFind);
+      mockFind.select = jest.fn().mockResolvedValue(mockFigures);
+
+      MockedFigure.find = jest.fn().mockReturnValue(mockFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(1);
+
+      // Set fieldProjection on request (as fieldSelection middleware would)
+      (mockRequest as any).fieldProjection = { _id: 1, name: 1, imageUrl: 1 };
+
+      await figureController.getFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockFind.select).toHaveBeenCalledWith({ _id: 1, name: 1, imageUrl: 1 });
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+      expect(mockResponse.json).toHaveBeenCalledWith(
+        expect.objectContaining({
+          success: true,
+          data: mockFigures
+        })
+      );
+    });
+
+    it('should use cursor pagination when cursorPagination is set on request', async () => {
+      const mockFigures = [
+        { _id: 'fig1', name: 'Miku', createdAt: new Date('2024-01-01') },
+        { _id: 'fig2', name: 'Rin', createdAt: new Date('2024-01-02') }
+      ];
+
+      const mockCursorFind = {
+        sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue(mockFigures), // 2 results, limit was 20+1=21, so hasMore=false
+      };
+
+      const mockAfterDoc = { _id: 'prevId', mfcActivityOrder: 5 };
+      const mockSelectLean = { lean: jest.fn().mockResolvedValue(mockAfterDoc) };
+      MockedFigure.findById = jest.fn().mockReturnValue({ select: jest.fn().mockReturnValue(mockSelectLean) });
+      MockedFigure.find = jest.fn().mockReturnValue(mockCursorFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(50);
+
+      (mockRequest as any).cursorPagination = {
+        after: 'prevId',
+        limit: 20
+      };
+
+      await figureController.getFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(MockedFigure.findById).toHaveBeenCalledWith('prevId');
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+      const jsonCall = (mockResponse.json as jest.Mock).mock.calls[0][0];
+      expect(jsonCall.success).toBe(true);
+      expect(jsonCall.pagination).toBeDefined();
+      expect(jsonCall.pagination.hasMore).toBe(false);
+      expect(jsonCall.pagination.total).toBe(50);
+    });
+
+    it('should return hasMore=true when cursor query returns more items than limit', async () => {
+      // Return limit+1 items to indicate there are more
+      const mockFigures = Array.from({ length: 6 }, (_, i) => ({
+        _id: `fig${i}`,
+        name: `Figure ${i}`,
+      }));
+
+      const mockCursorFind = {
+        sort: jest.fn().mockReturnThis(),
+        collation: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockResolvedValue(mockFigures), // 6 results for limit of 5
+      };
+
+      MockedFigure.find = jest.fn().mockReturnValue(mockCursorFind);
+      MockedFigure.countDocuments = jest.fn().mockResolvedValue(100);
+
+      (mockRequest as any).cursorPagination = {
+        after: undefined,
+        before: undefined,
+        limit: 5
+      };
+
+      await figureController.getFigures(mockRequest as Request, mockResponse as Response);
+
+      expect(mockResponse.status).toHaveBeenCalledWith(200);
+      const jsonCall = (mockResponse.json as jest.Mock).mock.calls[0][0];
+      expect(jsonCall.pagination.hasMore).toBe(true);
+      expect(jsonCall.figures).toHaveLength(5); // Sliced to limit
+      expect(jsonCall.pagination.nextCursor).toBe('fig4');
+    });
   });
 
   describe('getFigureById', () => {
