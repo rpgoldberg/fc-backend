@@ -47,3 +47,9 @@ export { default as EmailVerificationToken, IEmailVerificationToken } from './Em
 export { default as PasswordResetToken, IPasswordResetToken } from './PasswordResetToken';
 export { default as TwoFactorSession, ITwoFactorSession } from './TwoFactorSession';
 export { default as WebAuthnChallenge, IWebAuthnChallenge } from './WebAuthnChallenge';
+export {
+  default as Notification,
+  INotification,
+  INotificationData,
+  NotificationType
+} from './Notification';

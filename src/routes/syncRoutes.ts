@@ -18,6 +18,7 @@ import mongoose from 'mongoose';
 import { syncLogger } from '../utils/logger';
 import { upsertFigureSearchIndex } from '../services/searchIndexService';
 import { parseDimensionsString } from '../utils/parseDimensions';
+import { getNotificationService } from '../services/notificationService';
 
 // Interface for scraped company/artist data from scraper
 interface IScrapedCompany {
@@ -644,7 +645,7 @@ router.post('/webhook/item-complete', async (req, res) => {
       phase: job.phase
     });
 
-    // If job is complete, broadcast completion event and log
+    // If job is complete, broadcast completion event, log, and send notification
     if (job.phase === 'completed' || job.phase === 'failed') {
       syncLogger.jobComplete(sessionId, job.stats.completed, job.stats.failed, job.stats.total);
       broadcastToSession(sessionId, 'sync-complete', {
@@ -652,6 +653,14 @@ router.post('/webhook/item-complete', async (req, res) => {
         stats: job.stats,
         message: job.message
       });
+
+      // Send notification to user (best-effort, don't block response)
+      getNotificationService()
+        .sendSyncComplete(job.userId.toString(), sessionId, {
+          completed: job.stats.completed,
+          failed: job.stats.failed,
+        })
+        .catch(() => { /* logged internally */ });
     }
 
     return res.json({ success: true });
@@ -716,6 +725,14 @@ router.post('/webhook/phase-change', async (req, res) => {
           message: job.message,
           stats: job.stats
         });
+
+        // Send notification (best-effort)
+        getNotificationService()
+          .sendSyncComplete(job.userId.toString(), sessionId, {
+            completed: job.stats.completed,
+            failed: job.stats.failed,
+          })
+          .catch(() => { /* logged internally */ });
 
         return res.json({ success: true });
       }
