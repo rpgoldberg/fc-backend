@@ -92,7 +92,7 @@ export function generateBackupCodes(count: number = 10): string[] {
 // Hash backup codes for storage
 export async function hashBackupCodes(codes: string[]): Promise<string[]> {
   const hashed = await Promise.all(
-    codes.map(code => bcrypt.hash(code.replace('-', ''), 10))
+    codes.map(code => bcrypt.hash(code.replace('-', ''), 12))
   );
   return hashed;
 }

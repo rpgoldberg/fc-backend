@@ -137,7 +137,7 @@ export const register = async (req: Request, res: Response): Promise<Response | 
     // Send verification email (non-blocking — don't fail registration if email fails)
     try {
       const rawToken = crypto.randomBytes(32).toString('hex');
-      const tokenHash = await bcrypt.hash(rawToken, 10);
+      const tokenHash = await bcrypt.hash(rawToken, 12);
       await EmailVerificationToken.create({
         userId: user._id,
         tokenHash
@@ -202,7 +202,7 @@ export const login = async (req: Request, res: Response): Promise<Response | voi
       // Send verification email silently for existing users
       try {
         const rawToken = crypto.randomBytes(32).toString('hex');
-        const tokenHash = await bcrypt.hash(rawToken, 10);
+        const tokenHash = await bcrypt.hash(rawToken, 12);
         await EmailVerificationToken.create({ userId: user._id, tokenHash });
         await sendVerificationEmail(email, rawToken, user._id.toString());
       } catch (emailError) {
