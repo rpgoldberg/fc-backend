@@ -43,6 +43,11 @@ export {
   ListPrivacy,
   MFC_LIST_LIMITS
 } from './MfcList';
+export {
+  default as DuplicateDismissal,
+  IDuplicateDismissal,
+  IDuplicateDismissalData
+} from './DuplicateDismissal';
 export { default as EmailVerificationToken, IEmailVerificationToken } from './EmailVerificationToken';
 export { default as PasswordResetToken, IPasswordResetToken } from './PasswordResetToken';
 export { default as TwoFactorSession, ITwoFactorSession } from './TwoFactorSession';

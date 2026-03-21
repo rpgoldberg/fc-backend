@@ -11,6 +11,7 @@ import {
 } from '../controllers/figureController';
 import { searchFigures, publicSearchFigures } from '../controllers/searchController';
 import { getFigureStats } from '../controllers/statsController';
+import { getDuplicates, dismissDuplicate, mergeDuplicates } from '../controllers/duplicateController';
 import { protect } from '../middleware/authMiddleware';
 import {
   validateRequest,
@@ -80,6 +81,17 @@ router.get('/filter',
   filterFigures
 );
 router.get('/stats', getFigureStats);
+
+// Duplicate detection routes
+router.get('/duplicates', getDuplicates);
+router.post('/duplicates/dismiss',
+  validateContentType(['application/json']),
+  dismissDuplicate
+);
+router.post('/duplicates/merge',
+  validateContentType(['application/json']),
+  mergeDuplicates
+);
 
 router.route('/:id')
   .get(validateObjectId(), getFigureById)
