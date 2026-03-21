@@ -8,6 +8,7 @@
  * 3. Ensure cookies are passed per-request (ephemeral, not stored)
  * 4. Receive webhooks from scraper on item completion
  * 5. Stream real-time progress to frontend via SSE
+ * 6. Emit real-time progress to frontend via WebSocket (Socket.IO)
  */
 import express, { Response } from 'express';
 import crypto from 'crypto';
@@ -17,6 +18,7 @@ import { SyncJob, ISyncJob, SyncItemStatus, Figure, Company, Artist, RoleType, M
 import mongoose from 'mongoose';
 import { syncLogger } from '../utils/logger';
 import { upsertFigureSearchIndex } from '../services/searchIndexService';
+import { emitSyncEvent } from '../services/websocketService';
 import { parseDimensionsString } from '../utils/parseDimensions';
 
 // Interface for scraped company/artist data from scraper
@@ -644,10 +646,24 @@ router.post('/webhook/item-complete', async (req, res) => {
       phase: job.phase
     });
 
+    // Also broadcast via WebSocket for mobile clients
+    emitSyncEvent(sessionId, 'item-update', {
+      mfcId,
+      status,
+      error: itemError,
+      stats: job.stats,
+      phase: job.phase
+    });
+
     // If job is complete, broadcast completion event and log
     if (job.phase === 'completed' || job.phase === 'failed') {
       syncLogger.jobComplete(sessionId, job.stats.completed, job.stats.failed, job.stats.total);
       broadcastToSession(sessionId, 'sync-complete', {
+        phase: job.phase,
+        stats: job.stats,
+        message: job.message
+      });
+      emitSyncEvent(sessionId, 'sync-complete', {
         phase: job.phase,
         stats: job.stats,
         message: job.message
@@ -716,6 +732,11 @@ router.post('/webhook/phase-change', async (req, res) => {
           message: job.message,
           stats: job.stats
         });
+        emitSyncEvent(sessionId, 'sync-complete', {
+          phase: 'completed',
+          message: job.message,
+          stats: job.stats
+        });
 
         return res.json({ success: true });
       }
@@ -750,6 +771,11 @@ router.post('/webhook/phase-change', async (req, res) => {
 
     // Broadcast phase change
     broadcastToSession(sessionId, 'phase-change', {
+      phase: job.phase,
+      message: job.message,
+      stats: job.stats
+    });
+    emitSyncEvent(sessionId, 'phase-change', {
       phase: job.phase,
       message: job.message,
       stats: job.stats
@@ -1107,6 +1133,11 @@ router.delete('/job/:sessionId', protect, async (req, res) => {
     broadcastToSession(sessionId, 'sync-complete', {
       phase: 'cancelled',
       stats: job.stats,  // Preserve completed/failed counts for UI display
+      message: job.message
+    });
+    emitSyncEvent(sessionId, 'sync-complete', {
+      phase: 'cancelled',
+      stats: job.stats,
       message: job.message
     });
 

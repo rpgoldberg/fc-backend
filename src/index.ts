@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
+import { createServer } from 'http';
 import figureRoutes from './routes/figureRoutes';
 import userRoutes from './routes/userRoutes';
 import authRoutes from './routes/authRoutes';
@@ -15,6 +16,7 @@ import { connectDB } from './config/db';
 import { globalErrorHandler } from './middleware/validationMiddleware';
 import * as packageJson from '../package.json';
 import { createLogger } from './utils/logger';
+import { initializeWebSocket } from './services/websocketService';
 
 const logger = createLogger('MAIN');
 const registerLogger = createLogger('REGISTER');
@@ -129,15 +131,20 @@ app.use((req, res) => {
   res.status(404).json({ message: 'Route not found' });
 });
 
-// Graceful shutdown handling
-let server: ReturnType<typeof app.listen>;
+// Create HTTP server from Express app (required for Socket.IO)
+const httpServer = createServer(app);
+export { httpServer };
 
+// Initialize WebSocket server
+initializeWebSocket(httpServer);
+
+// Graceful shutdown handling
 const gracefulShutdown = async (signal: string) => {
   logger.info(`Received ${signal}. Starting graceful shutdown...`);
 
   // Stop accepting new connections
-  if (server) {
-    server.close(() => {
+  if (httpServer) {
+    httpServer.close(() => {
       logger.info('HTTP server closed');
     });
   }
@@ -164,8 +171,8 @@ const startServer = async () => {
     await connectDB();
     logger.info('MongoDB connected successfully');
 
-    // Now start the HTTP server
-    server = app.listen(PORT, () => {
+    // Now start the HTTP server (using httpServer instead of app.listen for Socket.IO)
+    httpServer.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`);
     });
   } catch (err) {

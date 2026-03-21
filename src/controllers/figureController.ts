@@ -6,6 +6,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import { createLogger } from '../utils/logger';
 import { upsertFigureSearchIndex, deleteFigureSearchIndex } from '../services/searchIndexService';
+import { emitCollectionUpdate } from '../services/websocketService';
 import { validateTags } from '../utils/tagValidation';
 
 // Create secure logger instance for this controller
@@ -771,6 +772,9 @@ export const createFigure = async (req: Request, res: Response) => {
     // Sync search index (fire-and-forget)
     upsertFigureSearchIndex(figure).catch(() => {});
 
+    // Notify connected WebSocket clients of the new figure
+    emitCollectionUpdate(userId, { action: 'created', figure });
+
     return res.status(201).json({
       success: true,
       data: figure
@@ -1019,6 +1023,9 @@ export const updateFigure = async (req: Request, res: Response) => {
       upsertFigureSearchIndex(figure).catch(() => {});
     }
 
+    // Notify connected WebSocket clients of the update
+    emitCollectionUpdate(userId, { action: 'updated', figure });
+
     return res.status(200).json({
       success: true,
       data: figure
@@ -1063,6 +1070,9 @@ export const deleteFigure = async (req: Request, res: Response) => {
     try {
       deleteFigureSearchIndex(new mongoose.Types.ObjectId(req.params.id as string)).catch(() => {});
     } catch { /* ignore ObjectId conversion errors */ }
+
+    // Notify connected WebSocket clients of the deletion
+    emitCollectionUpdate(userId, { action: 'deleted', figureId: req.params.id });
 
     return res.status(200).json({
       success: true,
