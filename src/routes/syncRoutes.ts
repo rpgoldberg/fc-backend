@@ -251,10 +251,29 @@ const proxyToScraper = async (
 };
 
 /**
- * POST /sync/validate-cookies
- * Validate MFC session cookies before starting a sync
- * Cookies are passed in request body, used once, then discarded
- * Uses lighter rate limit than sync operations (validation is lightweight)
+ * @openapi
+ * /sync/validate-cookies:
+ *   post:
+ *     summary: Validate MFC session cookies
+ *     tags: [Sync]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [cookies]
+ *             properties:
+ *               cookies:
+ *                 type: string
+ *                 description: MFC session cookies
+ *     responses:
+ *       200:
+ *         description: Cookies are valid
+ *       400:
+ *         description: Missing cookies
+ *       401:
+ *         description: Unauthorized
  */
 router.post('/validate-cookies', protect, validationLimiter, async (req, res) => {
   try {
@@ -280,8 +299,28 @@ router.post('/validate-cookies', protect, validationLimiter, async (req, res) =>
 });
 
 /**
- * POST /sync/parse-csv
- * Parse MFC CSV content without executing sync
+ * @openapi
+ * /sync/parse-csv:
+ *   post:
+ *     summary: Parse MFC CSV content (preview, no sync)
+ *     tags: [Sync]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [csvContent]
+ *             properties:
+ *               csvContent:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Parsed CSV data
+ *       400:
+ *         description: Missing CSV content
+ *       401:
+ *         description: Unauthorized
  */
 router.post('/parse-csv', protect, async (req, res) => {
   try {
@@ -307,9 +346,33 @@ router.post('/parse-csv', protect, async (req, res) => {
 });
 
 /**
- * POST /sync/from-csv
- * Sync figures from user-provided CSV content
- * Cookies passed per-request for any NSFW items that need auth
+ * @openapi
+ * /sync/from-csv:
+ *   post:
+ *     summary: Sync figures from CSV content
+ *     tags: [Sync]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [csvContent]
+ *             properties:
+ *               csvContent:
+ *                 type: string
+ *               cookies:
+ *                 type: string
+ *                 description: MFC cookies for NSFW items
+ *               sessionId:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Sync started
+ *       400:
+ *         description: Missing CSV content
+ *       401:
+ *         description: Unauthorized
  */
 router.post('/from-csv', protect, syncLimiter, async (req, res) => {
   try {
@@ -341,13 +404,45 @@ router.post('/from-csv', protect, syncLimiter, async (req, res) => {
 });
 
 /**
- * POST /sync/full
- * Full sync: validate cookies → export CSV from MFC → parse → queue
- * Cookies passed per-request
- *
- * This endpoint also passes webhook configuration to the scraper so it
- * can call back when items are processed. The backend then updates the
- * SyncJob and broadcasts via SSE.
+ * @openapi
+ * /sync/full:
+ *   post:
+ *     summary: Start a full MFC collection sync
+ *     tags: [Sync]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [cookies, sessionId]
+ *             properties:
+ *               cookies:
+ *                 type: string
+ *                 description: MFC session cookies
+ *               sessionId:
+ *                 type: string
+ *                 description: Client-generated session ID for tracking
+ *               includeLists:
+ *                 type: boolean
+ *               skipCached:
+ *                 type: boolean
+ *               statusFilter:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   enum: [owned, ordered, wished]
+ *     responses:
+ *       200:
+ *         description: Sync initiated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SyncJob'
+ *       400:
+ *         description: Missing required fields
+ *       401:
+ *         description: Unauthorized
  */
 router.post('/full', protect, syncLimiter, async (req, res) => {
   try {
@@ -395,8 +490,16 @@ router.post('/full', protect, syncLimiter, async (req, res) => {
 });
 
 /**
- * GET /sync/status
- * Get current sync status for the user
+ * @openapi
+ * /sync/status:
+ *   get:
+ *     summary: Get current sync status
+ *     tags: [Sync]
+ *     responses:
+ *       200:
+ *         description: Current sync status
+ *       401:
+ *         description: Unauthorized
  */
 router.get('/status', protect, async (req, res) => {
   try {
@@ -413,8 +516,16 @@ router.get('/status', protect, async (req, res) => {
 });
 
 /**
- * GET /sync/queue-stats
- * Get detailed queue statistics
+ * @openapi
+ * /sync/queue-stats:
+ *   get:
+ *     summary: Get sync queue statistics
+ *     tags: [Sync]
+ *     responses:
+ *       200:
+ *         description: Queue statistics
+ *       401:
+ *         description: Unauthorized
  */
 router.get('/queue-stats', protect, async (req, res) => {
   try {
@@ -848,9 +959,28 @@ router.post('/webhook/lists-sync', async (req, res) => {
 // ============================================================================
 
 /**
- * GET /sync/stream/:sessionId
- * Server-Sent Events stream for real-time sync progress.
- * Frontend connects to receive live updates.
+ * @openapi
+ * /sync/stream/{sessionId}:
+ *   get:
+ *     summary: SSE stream for real-time sync progress
+ *     tags: [Sync]
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Server-Sent Events stream
+ *         content:
+ *           text/event-stream:
+ *             schema:
+ *               type: string
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Sync job not found
  */
 router.get('/stream/:sessionId', protect, async (req, res) => {
   const sessionId = req.params.sessionId as string;
@@ -910,9 +1040,28 @@ router.get('/stream/:sessionId', protect, async (req, res) => {
 });
 
 /**
- * GET /sync/active-job
- * Find the user's active sync job without knowing the session ID.
- * Used for session recovery after page refresh or SSE disconnection.
+ * @openapi
+ * /sync/active-job:
+ *   get:
+ *     summary: Get the user's active sync job
+ *     tags: [Sync]
+ *     description: Find active sync job for session recovery after page refresh
+ *     responses:
+ *       200:
+ *         description: Active job status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 hasActiveJob:
+ *                   type: boolean
+ *                 job:
+ *                   $ref: '#/components/schemas/SyncJob'
+ *       401:
+ *         description: Unauthorized
  */
 router.get('/active-job', protect, async (req, res) => {
   try {
@@ -973,8 +1122,33 @@ router.get('/active-job', protect, async (req, res) => {
 });
 
 /**
- * GET /sync/job/:sessionId
- * Get current sync job state (for initial load or reconnection).
+ * @openapi
+ * /sync/job/{sessionId}:
+ *   get:
+ *     summary: Get sync job by session ID
+ *     tags: [Sync]
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Sync job state
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 job:
+ *                   $ref: '#/components/schemas/SyncJob'
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Job not found
  */
 router.get('/job/:sessionId', protect, async (req, res) => {
   try {
@@ -1007,8 +1181,43 @@ router.get('/job/:sessionId', protect, async (req, res) => {
 });
 
 /**
- * POST /sync/job
- * Create a new sync job (called before starting sync).
+ * @openapi
+ * /sync/job:
+ *   post:
+ *     summary: Create a new sync job
+ *     tags: [Sync]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [sessionId]
+ *             properties:
+ *               sessionId:
+ *                 type: string
+ *               includeLists:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *               skipCached:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Sync job created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 job:
+ *                   $ref: '#/components/schemas/SyncJob'
+ *       400:
+ *         description: Missing sessionId
+ *       401:
+ *         description: Unauthorized
  */
 router.post('/job', protect, async (req, res) => {
   try {
@@ -1069,8 +1278,26 @@ router.post('/job', protect, async (req, res) => {
 });
 
 /**
- * DELETE /sync/job/:sessionId
- * Cancel an active sync job.
+ * @openapi
+ * /sync/job/{sessionId}:
+ *   delete:
+ *     summary: Cancel an active sync job
+ *     tags: [Sync]
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Sync cancelled
+ *       400:
+ *         description: Job already completed
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Job not found
  */
 router.delete('/job/:sessionId', protect, async (req, res) => {
   try {

@@ -29,6 +29,44 @@ const userLimiter = rateLimit({
 // All user routes are rate-limited and protected (rate limit BEFORE auth to prevent brute force)
 router.use(userLimiter);
 router.use(protect);
+
+/**
+ * @openapi
+ * /users/profile:
+ *   get:
+ *     summary: Get current user's profile
+ *     tags: [Users]
+ *     responses:
+ *       200:
+ *         description: User profile
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/UserProfile'
+ *       401:
+ *         description: Unauthorized
+ *   put:
+ *     summary: Update current user's profile
+ *     tags: [Users]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               username:
+ *                 type: string
+ *               mfcUsername:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Profile updated
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
+ */
 router.route('/profile')
   .get(getUserProfile)
   .put(

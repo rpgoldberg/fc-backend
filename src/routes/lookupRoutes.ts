@@ -25,12 +25,60 @@ const lookupLimiter = rateLimit({
 router.use(lookupLimiter);
 router.use(protect);
 
+/**
+ * @openapi
+ * /lookup/role-types:
+ *   get:
+ *     summary: Get available role types
+ *     tags: [Lookup]
+ *     responses:
+ *       200:
+ *         description: List of role types for companies and artists
+ *       401:
+ *         description: Unauthorized
+ */
 // Role types
 router.get('/role-types', getRoleTypes);
 
+/**
+ * @openapi
+ * /lookup/companies:
+ *   get:
+ *     summary: Get companies for autocomplete
+ *     tags: [Lookup]
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         schema:
+ *           type: string
+ *         description: Search query
+ *     responses:
+ *       200:
+ *         description: List of companies
+ *       401:
+ *         description: Unauthorized
+ */
 // Companies
 router.get('/companies', getCompanies);
 
+/**
+ * @openapi
+ * /lookup/artists:
+ *   get:
+ *     summary: Get artists for autocomplete
+ *     tags: [Lookup]
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         schema:
+ *           type: string
+ *         description: Search query
+ *     responses:
+ *       200:
+ *         description: List of artists
+ *       401:
+ *         description: Unauthorized
+ */
 // Artists
 router.get('/artists', getArtists);
 

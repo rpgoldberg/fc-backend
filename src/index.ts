@@ -13,6 +13,8 @@ import lookupRoutes from './routes/lookupRoutes';
 import listRoutes from './routes/listRoutes';
 import { connectDB } from './config/db';
 import { globalErrorHandler } from './middleware/validationMiddleware';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './config/swagger';
 import * as packageJson from '../package.json';
 import { createLogger } from './utils/logger';
 
@@ -40,6 +42,13 @@ app.use((req, res, next) => {
   console.log('[REQUEST]', req.method, JSON.stringify(req.path), JSON.stringify(req.url), 'Host:', JSON.stringify(req.get('host')));
   next();
 });
+
+// OpenAPI documentation (no auth required)
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'FigureCollecting API Docs',
+}));
+app.get('/api-docs.json', (_req, res) => res.json(swaggerSpec));
 
 // Routes
 app.use('/auth', authRoutes);
