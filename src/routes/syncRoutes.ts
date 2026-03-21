@@ -12,7 +12,11 @@
 import express, { Response } from 'express';
 import crypto from 'crypto';
 import { protect } from '../middleware/authMiddleware';
-import rateLimit from 'express-rate-limit';
+import {
+  syncGeneralRateLimit,
+  syncOperationRateLimit,
+  syncValidationRateLimit
+} from '../middleware/rateLimiting';
 import { SyncJob, ISyncJob, SyncItemStatus, Figure, Company, Artist, RoleType, MfcList, MFCItem } from '../models';
 import mongoose from 'mongoose';
 import { syncLogger } from '../utils/logger';
@@ -130,17 +134,8 @@ async function processScrapedArtists(
 const router = express.Router();
 
 // General rate limiter for user-facing sync routes
-// Webhook routes (/webhook/*) are exempt — they use HMAC signature auth
-// and must handle high-throughput item-complete callbacks during sync
-const generalSyncLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per 15 minutes
-  message: { success: false, message: 'Too many requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req) => req.path.startsWith('/webhook/'),
-});
-router.use(generalSyncLimiter);
+// Webhook routes are exempt — handled inside syncGeneralRateLimit via skip function
+router.use(syncGeneralRateLimit);
 
 // Store for active SSE connections by sessionId
 const sseConnections = new Map<string, Set<Response>>();
@@ -196,23 +191,7 @@ async function cleanupStaleSessions(): Promise<void> {
 // Start periodic stale session cleanup (unref so it doesn't prevent process exit)
 setInterval(cleanupStaleSessions, STALE_CLEANUP_INTERVAL_MS).unref();
 
-// Rate limiting for sync operations (restrictive - these are heavy operations)
-const syncLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // 10 sync operations per 15 minutes
-  message: { success: false, message: 'Too many sync requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-// Separate rate limiter for validation (more lenient - lightweight operation)
-const validationLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 60, // 60 validations per 15 minutes (allows for modal open/close testing)
-  message: { success: false, message: 'Too many validation requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+// Sync operation and validation rate limiters imported from centralized module
 
 /**
  * Helper to proxy requests to the scraper service
@@ -256,7 +235,7 @@ const proxyToScraper = async (
  * Cookies are passed in request body, used once, then discarded
  * Uses lighter rate limit than sync operations (validation is lightweight)
  */
-router.post('/validate-cookies', protect, validationLimiter, async (req, res) => {
+router.post('/validate-cookies', protect, syncValidationRateLimit, async (req, res) => {
   try {
     const { cookies } = req.body;
     const userId = (req as any).user?.id;
@@ -311,7 +290,7 @@ router.post('/parse-csv', protect, async (req, res) => {
  * Sync figures from user-provided CSV content
  * Cookies passed per-request for any NSFW items that need auth
  */
-router.post('/from-csv', protect, syncLimiter, async (req, res) => {
+router.post('/from-csv', protect, syncOperationRateLimit, async (req, res) => {
   try {
     const { csvContent, cookies, sessionId } = req.body;
     const userId = (req as any).user?.id;
@@ -349,7 +328,7 @@ router.post('/from-csv', protect, syncLimiter, async (req, res) => {
  * can call back when items are processed. The backend then updates the
  * SyncJob and broadcasts via SSE.
  */
-router.post('/full', protect, syncLimiter, async (req, res) => {
+router.post('/full', protect, syncOperationRateLimit, async (req, res) => {
   try {
     const { cookies, sessionId, includeLists, skipCached, statusFilter } = req.body;
     const userId = (req as any).user?.id;

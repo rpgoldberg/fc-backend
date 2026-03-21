@@ -1,5 +1,4 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
 import {
   getLists,
   getListById,
@@ -17,24 +16,12 @@ import {
   schemas,
   validateObjectId
 } from '../middleware/validationMiddleware';
+import { apiRateLimit } from '../middleware/rateLimiting';
 
 const router = express.Router();
 
-// Skip rate limiting in test environment
-const isTestEnv = process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'memory';
-
-// Rate limiting for list routes
-const listApiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isTestEnv ? 0 : 200, // 0 = disabled in test
-  message: { success: false, message: 'Too many requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => isTestEnv,
-});
-
 // Apply rate limiting to all routes
-router.use(listApiLimiter);
+router.use(apiRateLimit);
 
 // All routes require authentication
 router.use(protect);

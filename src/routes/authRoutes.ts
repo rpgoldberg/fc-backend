@@ -1,5 +1,4 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
 import {
   register,
   login,
@@ -34,79 +33,42 @@ import {
   validateContentType
 } from '../middleware/validationMiddleware';
 import { protect } from '../middleware/authMiddleware';
+import {
+  authRateLimit,
+  generalAuthRateLimit,
+  sensitiveAuthRateLimit,
+  emailActionRateLimit
+} from '../middleware/rateLimiting';
 
 const router = express.Router();
-
-// Skip rate limiting in test environment
-const isTestEnv = process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'memory';
-
-// Rate limiting for auth routes (stricter for login/register to prevent brute force)
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isTestEnv ? 0 : 10, // 0 = disabled in test, 10 requests per window per IP in prod
-  message: { success: false, message: 'Too many authentication attempts, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => isTestEnv, // Skip rate limiting in test environment
-});
-
-// General rate limiter for other auth endpoints
-const generalAuthLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isTestEnv ? 0 : 100, // 0 = disabled in test
-  message: { success: false, message: 'Too many requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => isTestEnv,
-});
-
-// Strict rate limiter for sensitive operations (2FA verify, resend, forgot password)
-const sensitiveAuthLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minutes
-  max: isTestEnv ? 0 : 5,
-  message: { success: false, message: 'Too many attempts, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => isTestEnv,
-});
-
-// Resend/forgot password rate limiter (3 req / 15 min)
-const emailActionLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isTestEnv ? 0 : 3,
-  message: { success: false, message: 'Too many requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => isTestEnv,
-});
 
 // ═══════════════════════════════════════════════
 // Public routes with strict rate limiting
 // ═══════════════════════════════════════════════
 
 router.post('/register',
-  authLimiter,
+  authRateLimit,
   validateContentType(['application/json']),
   validateRequest(schemas.userRegister),
   register
 );
 
 router.post('/login',
-  authLimiter,
+  authRateLimit,
   validateContentType(['application/json']),
   validateRequest(schemas.userLogin),
   login
 );
 
 router.post('/refresh',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   validateContentType(['application/json']),
   validateRequest(schemas.refreshToken),
   refresh
 );
 
 router.post('/logout',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   validateContentType(['application/json']),
   logout
 );
@@ -116,28 +78,28 @@ router.post('/logout',
 // ═══════════════════════════════════════════════
 
 router.post('/verify-email',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   validateContentType(['application/json']),
   validateRequest(schemas.verifyEmail),
   verifyEmail
 );
 
 router.post('/resend-verification',
-  emailActionLimiter,
+  emailActionRateLimit,
   validateContentType(['application/json']),
   validateRequest(schemas.resendVerification),
   resendVerification
 );
 
 router.post('/forgot-password',
-  emailActionLimiter,
+  emailActionRateLimit,
   validateContentType(['application/json']),
   validateRequest(schemas.forgotPassword),
   forgotPassword
 );
 
 router.post('/reset-password',
-  authLimiter,
+  authRateLimit,
   validateContentType(['application/json']),
   validateRequest(schemas.resetPassword),
   resetPassword
@@ -149,7 +111,7 @@ router.post('/reset-password',
 
 // 2FA verification during login (public — uses session ID, not JWT)
 router.post('/2fa/verify',
-  sensitiveAuthLimiter,
+  sensitiveAuthRateLimit,
   validateContentType(['application/json']),
   validateRequest(schemas.verify2FA),
   verify2FA
@@ -157,13 +119,13 @@ router.post('/2fa/verify',
 
 // TOTP setup flow (protected)
 router.post('/2fa/totp/setup',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   protect,
   setupTOTP
 );
 
 router.post('/2fa/totp/verify-setup',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   protect,
   validateContentType(['application/json']),
   validateRequest(schemas.totpVerifySetup),
@@ -171,7 +133,7 @@ router.post('/2fa/totp/verify-setup',
 );
 
 router.delete('/2fa/totp',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   protect,
   validateContentType(['application/json']),
   validateRequest(schemas.totpDisable),
@@ -180,7 +142,7 @@ router.delete('/2fa/totp',
 
 // Backup codes (protected)
 router.post('/2fa/backup-codes',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   protect,
   validateContentType(['application/json']),
   validateRequest(schemas.regenerateBackupCodes),
@@ -193,7 +155,7 @@ router.post('/2fa/backup-codes',
 
 // Registration (protected — user must be logged in to add a passkey)
 router.post('/webauthn/register/options',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   protect,
   validateContentType(['application/json']),
   validateRequest(schemas.webauthnRegisterOptions),
@@ -201,7 +163,7 @@ router.post('/webauthn/register/options',
 );
 
 router.post('/webauthn/register/verify',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   protect,
   validateContentType(['application/json']),
   validateRequest(schemas.webauthnRegisterVerify),
@@ -210,14 +172,14 @@ router.post('/webauthn/register/verify',
 
 // Login with passkey (public)
 router.post('/webauthn/login/options',
-  authLimiter,
+  authRateLimit,
   validateContentType(['application/json']),
   validateRequest(schemas.webauthnLoginOptions),
   webauthnLoginOptions
 );
 
 router.post('/webauthn/login/verify',
-  authLimiter,
+  authRateLimit,
   validateContentType(['application/json']),
   validateRequest(schemas.webauthnLoginVerify),
   webauthnLoginVerify
@@ -225,7 +187,7 @@ router.post('/webauthn/login/verify',
 
 // Delete a passkey credential (protected)
 router.delete('/webauthn/credential/:id',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   protect,
   deleteWebAuthnCredential
 );
@@ -235,26 +197,26 @@ router.delete('/webauthn/credential/:id',
 // ═══════════════════════════════════════════════
 
 router.post('/logout-all',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   protect,
   logoutAll
 );
 
 router.get('/sessions',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   protect,
   getSessions
 );
 
 // Profile routes
 router.get('/profile',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   protect,
   getProfile
 );
 
 router.put('/profile',
-  generalAuthLimiter,
+  generalAuthRateLimit,
   protect,
   validateContentType(['application/json']),
   updateProfile

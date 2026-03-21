@@ -1,5 +1,4 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
 import {
   scrapeMFCData,
   getFigures,
@@ -18,48 +17,16 @@ import {
   validateContentType,
   validateObjectId
 } from '../middleware/validationMiddleware';
+import { apiRateLimit, scrapeRateLimit, searchRateLimit } from '../middleware/rateLimiting';
 
 const router = express.Router();
 
-// Skip rate limiting in test environment
-const isTestEnv = process.env.NODE_ENV === 'test' || process.env.TEST_MODE === 'memory';
-
-// Rate limiting for figure routes
-const figureApiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isTestEnv ? 0 : 200, // 0 = disabled in test
-  message: { success: false, message: 'Too many requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => isTestEnv,
-});
-
-// Scraping rate limiter (more restrictive)
-const scrapeLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: isTestEnv ? 0 : 5, // 0 = disabled in test
-  message: { success: false, message: 'Too many scrape requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => isTestEnv,
-});
-
-// Public search rate limiter (stricter than authenticated)
-const publicSearchLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isTestEnv ? 0 : 30,
-  message: { success: false, message: 'Too many search requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: () => isTestEnv,
-});
-
 // Public routes (no authentication required)
-router.post('/scrape-mfc', scrapeLimiter, scrapeMFCData);
-router.get('/public/search', publicSearchLimiter, publicSearchFigures);
+router.post('/scrape-mfc', scrapeRateLimit, scrapeMFCData);
+router.get('/public/search', searchRateLimit, publicSearchFigures);
 
 // Apply rate limiting to all protected routes
-router.use(figureApiLimiter);
+router.use(apiRateLimit);
 
 // Protected routes
 router.use(protect);

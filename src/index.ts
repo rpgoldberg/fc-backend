@@ -13,6 +13,7 @@ import lookupRoutes from './routes/lookupRoutes';
 import listRoutes from './routes/listRoutes';
 import { connectDB } from './config/db';
 import { globalErrorHandler } from './middleware/validationMiddleware';
+import { globalRateLimit } from './middleware/rateLimiting';
 import * as packageJson from '../package.json';
 import { createLogger } from './utils/logger';
 
@@ -34,6 +35,9 @@ app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Global rate limit - safety net for all routes (200 req/min per IP)
+app.use(globalRateLimit);
 
 // Debug logging for all requests (JSON.stringify prevents log injection)
 app.use((req, res, next) => {

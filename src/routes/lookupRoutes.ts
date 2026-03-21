@@ -6,23 +6,14 @@
  */
 
 import express from 'express';
-import rateLimit from 'express-rate-limit';
 import { protect } from '../middleware/authMiddleware';
 import { getRoleTypes, getCompanies, getArtists } from '../controllers/lookupController';
+import { lookupRateLimit } from '../middleware/rateLimiting';
 
 const router = express.Router();
 
-// Rate limiting for lookup routes
-const lookupLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 200, // 200 requests per 15 minutes
-  message: { success: false, message: 'Too many lookup requests, please try again later' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
 // All lookup routes require rate limiting and authentication
-router.use(lookupLimiter);
+router.use(lookupRateLimit);
 router.use(protect);
 
 // Role types
