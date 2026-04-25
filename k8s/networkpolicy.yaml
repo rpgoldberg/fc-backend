@@ -1,0 +1,58 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: fc-backend-policy
+  namespace: figurecollecting
+spec:
+  podSelector:
+    matchLabels:
+      app: fc-backend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow traffic from fc-frontend
+    - from:
+        - podSelector:
+            matchLabels:
+              app: fc-frontend
+      ports:
+        - protocol: TCP
+          port: 5050
+    # Allow traffic from Traefik ingress controller (kube-system namespace)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: TCP
+          port: 5050
+  egress:
+    # Allow egress to scraper
+    - to:
+        - podSelector:
+            matchLabels:
+              app: scraper
+      ports:
+        - protocol: TCP
+          port: 3050
+    # Allow egress to in-cluster MongoDB
+    - to:
+        - podSelector:
+            matchLabels:
+              app: mongodb
+      ports:
+        - protocol: TCP
+          port: 27017
+    # Allow egress to external MongoDB Atlas (port 27017)
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 27017

@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fc-backend-config
+  namespace: figurecollecting
+  labels:
+    app: fc-backend
+    app.kubernetes.io/name: fc-backend
+    app.kubernetes.io/part-of: figure-collector
+data:
+  NODE_ENV: production
+  PORT: "5050"
+  SCRAPER_SERVICE_URL: http://scraper:3050
